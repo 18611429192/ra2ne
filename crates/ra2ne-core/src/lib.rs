@@ -27,6 +27,21 @@ impl DeterministicRng {
 #[derive(Clone, Copy, Debug)]
 pub struct Unit { pub position: Vec2, pub goal: Vec2, pub speed: i32 }
 
+impl Unit {
+    /// Advances each axis by at most `speed`, and never overshoots the goal.
+    /// This stays integer-only so lockstep clients get identical results.
+    fn move_towards_goal(&mut self) {
+        self.position.x = advance_axis(self.position.x, self.goal.x, self.speed);
+        self.position.y = advance_axis(self.position.y, self.goal.y, self.speed);
+    }
+}
+
+fn advance_axis(current: i32, target: i32, speed: i32) -> i32 {
+    debug_assert!(speed >= 0);
+    let delta = target.saturating_sub(current);
+    current.saturating_add(delta.clamp(-speed, speed))
+}
+
 /// Deterministic broad-phase spatial index. BTreeMap gives stable traversal.
 #[derive(Debug)]
 pub struct SpatialGrid { cell_size: i32, cells: BTreeMap<(i32, i32), Vec<usize>> }
@@ -73,8 +88,7 @@ impl World {
     }
     pub fn tick(&mut self) {
         for unit in &mut self.units {
-            unit.position.x += (unit.goal.x - unit.position.x).signum() * unit.speed;
-            unit.position.y += (unit.goal.y - unit.position.y).signum() * unit.speed;
+            unit.move_towards_goal();
         }
         self.spatial.rebuild(&self.units);
         self.tick += 1;
@@ -107,5 +121,15 @@ mod tests {
         let first = world.nearby_candidate_count(Vec2::new(2_048, 2_048), 128);
         assert_eq!(first, world.nearby_candidate_count(Vec2::new(2_048, 2_048), 128));
         assert!(first < world.unit_count());
+    }
+    #[test]
+    fn movement_reaches_goal_without_overshooting() {
+        let mut unit = Unit { position: Vec2::new(0, 0), goal: Vec2::new(3, -3), speed: 2 };
+        unit.move_towards_goal();
+        assert_eq!(unit.position, Vec2::new(2, -2));
+        unit.move_towards_goal();
+        assert_eq!(unit.position, unit.goal);
+        unit.move_towards_goal();
+        assert_eq!(unit.position, unit.goal);
     }
 }
