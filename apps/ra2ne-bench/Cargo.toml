@@ -1,0 +1,8 @@
+[package]
+name = "ra2ne-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ra2ne-core = { path = "../../crates/ra2ne-core" }
