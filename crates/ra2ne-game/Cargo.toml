@@ -5,4 +5,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ra2ne-assets = { path = "../ra2ne-assets" }
 ra2ne-core = { path = "../ra2ne-core" }

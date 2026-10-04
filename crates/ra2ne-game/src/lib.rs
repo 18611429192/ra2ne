@@ -4,6 +4,7 @@ pub mod commands;
 mod economy;
 pub mod network;
 mod replay_file;
+pub mod rule_import;
 mod save;
 use economy::HarvestOrder;
 use ra2ne_core::{Unit, Vec2, World, navigation::NavigationMap};

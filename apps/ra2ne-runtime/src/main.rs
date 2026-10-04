@@ -1,6 +1,7 @@
 //! Interactive engine preview. Synthetic scenario plus decoded map/sprite views.
 //! This is an integration milestone, not the finished RA2/YR game.
 mod battle;
+mod rule_scenario;
 use battle::Simulation;
 use macroquad::prelude::*;
 use ra2ne_assets::{
@@ -26,6 +27,7 @@ struct Options {
     battle: bool,
     load_game: Option<String>,
     save_game: Option<String>,
+    rule_scenario: rule_scenario::Options,
 }
 impl Options {
     fn parse() -> Result<Self, String> {
@@ -34,7 +36,9 @@ impl Options {
             ..Default::default()
         };
         for arg in std::env::args().skip(1) {
-            if arg == "--battle" {
+            if options.rule_scenario.parse_arg(&arg)? {
+                continue;
+            } else if arg == "--battle" {
                 options.battle = true;
             } else if let Some(v) = arg.strip_prefix("--load-game=") {
                 options.load_game = Some(v.into());
@@ -63,6 +67,12 @@ impl Options {
                 return Err(format!("unknown option: {arg}"));
             }
         }
+        options.rule_scenario.validate()?;
+        if options.rule_scenario.enabled()
+            && (options.battle || options.load_game.is_some() || options.map.is_some())
+        {
+            return Err("rule experiment cannot be combined with battle, load-game or map".into());
+        }
         if options.map.is_some() && (options.battle || options.load_game.is_some()) {
             return Err("original map gameplay adapter is pending".into());
         }
@@ -73,7 +83,11 @@ impl Options {
         {
             return Err("save output already exists".into());
         }
-        if options.save_game.is_some() && !options.battle && options.load_game.is_none() {
+        if options.save_game.is_some()
+            && !options.battle
+            && options.load_game.is_none()
+            && !options.rule_scenario.enabled()
+        {
             return Err("game save requires battle mode".into());
         }
         if options.units > 20_000 {
@@ -159,7 +173,7 @@ impl Scene {
             }
             _ => None,
         };
-        let (mut map, mut tiles, units, mut owners, mut name, map_view_only, messages, center) =
+        let (mut map, mut tiles, units, mut owners, mut name, map_view_only, mut messages, center) =
             if let Some(path) = &options.map {
                 let bytes = read(path, 16 * 1024 * 1024)?;
                 let text = options
@@ -281,6 +295,18 @@ impl Scene {
                 .collect();
             name = "Restored synthetic skirmish".into();
             Simulation::Battle(Box::new(game))
+        } else if options.rule_scenario.enabled() {
+            let (game, diagnostics) = options.rule_scenario.create(
+                map.clone(),
+                options.units,
+                options.encoding.unwrap_or(TextEncoding::Utf8),
+            )?;
+            name = "Experimental INI skirmish".into();
+            for diagnostic in &diagnostics {
+                eprintln!("rule-import: {diagnostic}");
+            }
+            messages.extend(diagnostics.into_iter().take(100));
+            Simulation::Battle(Box::new(game))
         } else if options.battle {
             name = "Synthetic skirmish".into();
             Simulation::Battle(Box::new(battle::synthetic(map.clone(), options.units)?))
@@ -294,7 +320,7 @@ impl Scene {
             for owner in 0..2 {
                 let ids = game
                     .entities()
-                    .filter(|(_, a)| a.owner == owner && a.kind == 0)
+                    .filter(|(_, a)| a.owner == owner && game.rules().units[a.kind].speed > 0)
                     .map(|(id, _)| id)
                     .collect::<Vec<_>>();
                 game.move_units(owner, &ids, Cell::new(if owner == 0 { 30 } else { 34 }, 32))?;

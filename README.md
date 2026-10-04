@@ -2,9 +2,11 @@
 
 A modern, high-performance RTS runtime that reads users' own Red Alert 2 / Yuri's Revenge assets, maps and rules while preserving the classic ecosystem.
 
-## Current stage: Phase 0 / 1
+## Current stage: engine and compatibility foundations
 
-This first version deliberately has no EA assets, renderer, or MOD dependency. It establishes the new engine chassis first:
+The repository includes an interactive renderer and synthetic skirmish, but RA2NE
+1.0 is not complete. It distributes no EA assets and has no legacy DLL dependency.
+Implemented foundations include:
 
 - fixed 30 TPS simulation
 - integer coordinates and deterministic RNG
@@ -21,7 +23,10 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 - MIX directory reading, encrypted headers, checksums, archive/loose overlays
 - explicit UTF-8, Windows-1252 and GBK resource text decoding
 - bounded map packs, placed object records and indexed INI rule overlays
-- no rendering or complete original resource codecs yet
+- indexed SHP/PAL and TMP decoding, isometric interactive preview
+- synthetic combat, economy, production, engine saves and full-game replays
+- bounded TCP lockstep transport and independent peer verification
+- experimental layered INI definitions driving a playable test scenario
 
 ## Run
 
@@ -46,8 +51,8 @@ cargo run -p ra2ne-bench --release -- --replay-input=session.rpl
 
 Replay format v1 is for the current abstract simulation. Its checksum detects
 corruption; it does not authenticate recordings. Changing simulation semantics
-requires a format-version change. Network transport and playable multiplayer
-are still pending.
+requires a format-version change. Full-game recordings use a separate format.
+TCP transport is implemented; a playable multiplayer lobby is still pending.
 
 Synthetic asset frontend smoke check (no original assets required):
 
@@ -55,11 +60,13 @@ Synthetic asset frontend smoke check (no original assets required):
 cargo run -p ra2ne-bench --release -- --asset-check
 ```
 
-The INI frontend currently accepts UTF-8/ASCII, semicolon comments, repeated
+The INI frontend supports explicit UTF-8, Windows-1252 and GBK decoding, semicolon comments, repeated
 sections and last-value duplicate lookup. Registry entries retain source order.
-These are provisional frontend semantics pending original-game fixtures; parsed
-keys are not yet applied to unit/gameplay rules. VFS mounts replace whole files;
-INI rule merging across files is a separate future rules-loader operation.
+These are provisional frontend semantics pending original-game fixtures.
+VFS mounts replace whole files; the rules loader merges individual INI keys.
+An [experimental gameplay bridge](docs/RULE_EXPERIMENT.md) applies a subset of
+unit/weapon properties with explicit movement and timing calibration. Original
+gameplay and ordinary MOD compatibility remain unverified.
 
 Inspect your own resource files without modifying them:
 
@@ -128,3 +135,11 @@ cargo run --release -p ra2ne-bench -- --network-check --units=2000 --ticks=900
 ```
 
 This is an automated local connection fixture, not a multiplayer lobby.
+
+Run a synthetic INI-defined army with explicit experimental calibration:
+
+```sh
+cargo run --release -p ra2ne-runtime -- --rules-experiment=fixtures/rules-experiment.ini --rule-unit=TESTTANK --rule-speed=5:1 --rule-rof=1:1 --rule-build-ticks=90 --units=512 --autoplay --headless-ticks=900
+```
+
+See [rule experiment limits](docs/RULE_EXPERIMENT.md) before importing your rules.

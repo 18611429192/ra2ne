@@ -210,3 +210,34 @@ End-to-end TCP verification additionally ran two independent 2,000-unit games
 through 900 Ticks over a real localhost connection. Each Tick's state matched;
 encoding, decoding and replaying the recorded full-game commands produced the
 same final hash `5a835421a4a3e97a` (147,993-byte replay fixture).
+
+## 2026-10-04: layered rules now drive an experimental skirmish
+
+Added `ra2ne-game::rule_import` and runtime `--rules-experiment` mode. Effective
+INI overrides now supply health, cost, primary damage/range/reload, signed power
+and checked harvester flags to actual engine definitions. Type registry order
+and case-insensitive lookup are preserved. Movement and timing require explicit
+caller calibration; fractional combat range, unsupported air movement, healing
+damage, missing calibration and overflow fail instead of silently approximating.
+Unapplied armor, warhead/projectile, secondary, prerequisites, ownership, sight,
+images and factory categories report diagnostics. Buildings remain stationary
+engine definitions without construction/footprint semantics. Factories are not
+enabled by the importer until category restrictions exist. Full limits and CLI
+examples are in RULE_EXPERIMENT.md; a synthetic INI fixture is redistributable.
+
+Verified on Rust 1.99.0 / Linux:
+- 67 workspace tests pass; strict Clippy and formatting pass.
+- Release workspace build passes.
+- Imported fixture's damage is observed in combat; engine save/restore matches
+  events and hashes for 50 subsequent Tick calls in a dedicated test.
+- Two independent 512-unit runs requested 900 Tick calls, reached elimination
+  at Tick 628, and froze with the same hash `7dc34aa136498086`.
+- Saving at Tick 450 and restoring for 450 further calls reaches the identical
+  Tick 628 / `7dc34aa136498086` result. This is not 900 active combat Ticks.
+- TCP/replay regression: two independent peers, 2,000 units, 900 Ticks,
+  147,993-byte replay, unchanged final hash `5a835421a4a3e97a`.
+
+No graphical acceptance or original-asset compatibility claim is added by this
+batch. 1.0 remains incomplete: original movement/terrain semantics, armor and
+projectiles, full production/construction, audio, AI, multiplayer UI and real
+map/MOD acceptance fixtures still need work.
