@@ -30,7 +30,7 @@ Implemented foundations include:
 - experimental layered INI definitions driving a playable test scenario
 - standard armor and warhead Verses applied to damage and target acquisition
 - experimental primary/secondary weapon selection and pursuit
-- typed factories and exact owned-building production prerequisites
+- typed factories and owned-building prerequisite groups with generic aliases
 
 ## Run
 

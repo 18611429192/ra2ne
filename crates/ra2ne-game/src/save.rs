@@ -15,7 +15,7 @@ fn read_id(r: &mut Reader<'_>) -> Result<EntityId, &'static str> {
 impl Skirmish {
     pub fn save(&self) -> Result<Vec<u8>, &'static str> {
         let mut w = Writer::new();
-        w.0.extend_from_slice(b"RA2NEGS4");
+        w.0.extend_from_slice(b"RA2NEGS5");
         w.u64(self.tick);
         w.boolean(self.started_with_opponents);
         w.boolean(self.finished);
@@ -34,8 +34,11 @@ impl Skirmish {
                     w.u32(c as u32);
                 }
                 w.u64(p.prerequisites.len() as u64);
-                for &i in &p.prerequisites {
-                    w.u64(i as u64);
+                for group in &p.prerequisites {
+                    w.u64(group.len() as u64);
+                    for &i in group {
+                        w.u64(i as u64);
+                    }
                 }
             }
             w.u32(def.armor as u32);
@@ -115,7 +118,7 @@ impl Skirmish {
     }
     pub fn load(bytes: &[u8]) -> Result<Self, &'static str> {
         let mut r = Reader::new(bytes)?;
-        if r.take(8)? != b"RA2NEGS4" {
+        if r.take(8)? != b"RA2NEGS5" {
             return Err("unsupported game save");
         }
         let tick = r.u64()?;
@@ -135,15 +138,23 @@ impl Skirmish {
                     None
                 };
                 let n = r.count(1024)?;
-                prerequisite_count = prerequisite_count
-                    .checked_add(n)
-                    .ok_or("prerequisite size overflow")?;
-                if prerequisite_count > 1_000_000 {
-                    return Err("prerequisite total exceeds limit");
-                }
                 let mut prerequisites = Vec::with_capacity(n);
                 for _ in 0..n {
-                    prerequisites.push(r.count(definitions)?);
+                    let count = r.count(1024)?;
+                    if count == 0 {
+                        return Err("empty prerequisite group");
+                    }
+                    prerequisite_count = prerequisite_count
+                        .checked_add(count)
+                        .ok_or("prerequisite size overflow")?;
+                    if prerequisite_count > 1_000_000 {
+                        return Err("prerequisite total exceeds limit");
+                    }
+                    let mut group = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        group.push(r.count(definitions)?);
+                    }
+                    prerequisites.push(group);
                 }
                 Some(ProductionRules {
                     category,

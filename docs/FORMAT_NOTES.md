@@ -99,8 +99,8 @@ weapon/warhead/projectile/build/AI semantics are not implemented by this loader.
 
 The little-endian engine formats are independent of original game
 save/replay protocols: `RA2NEMV1` (movement), `RA2NEMP1` (navigation map),
-`RA2NEGS4` (full game save), `RA2NEGR4` (full replay) and `RA2NEGF1` (input frame).
-TCP handshake is `RA2NETP4`. Full-game v1/v2/v3 files and v1/v2/v3 peers are rejected after
+`RA2NEGS5` (full game save), `RA2NEGR5` (full replay) and `RA2NEGF1` (input frame).
+TCP handshake is `RA2NETP5`. Full-game v1/v2/v3/v4 files and v1/v2/v3/v4 peers are rejected after
 adding armor/Verses, secondary weapons and typed production constraints to combat semantics, hashes and definitions; no migration is
 provided. Movement/map/frame formats retain their v1 layouts.
 Saves preserve shared route identities, and reconstruct/revalidate BFS topology
@@ -138,11 +138,21 @@ retained with diagnostics. v3 also mixes the movement hash before hashing the
 game Tick, preventing the two identical Tick XORs from cancelling in idle games.
 
 
-Typed production v4 stores each definition's product category, optional factory
-category and resolved prerequisite indices. Limits: 1024 prerequisites per type,
+Typed production v5 stores each definition's product category, optional factory
+category and resolved prerequisite groups. Each group is a set of alternatives; all
+groups are required. Limits: 1024 groups per type, 1024 members per group,
 1,000,000 total; indices must refer to typed buildings. The
 [Phobos AI mapping reference](https://phobos.readthedocs.io/en/build-47/AI-Scripting-and-Mapping.html)
 identifies InfantryType/UnitType factory tags. Exact prerequisite ownership and
 pause/resume rules here are an explicit experimental subset, not verified
-original queue semantics; general aliases/faction/tech/building placement remain
+original queue semantics; non-building alternates/faction/tech/building placement remain
 pending. Restrictions participate in hashes and are restored before queues.
+
+
+[Ares prerequisite documentation](https://ares-developers.github.io/Ares-docs/new/prerequisites.html)
+identifies the six standard generic groups and custom `[GenericPrerequisites]`
+overrides. The adapter implements their building-member subset, canonicalized
+into OR-within/AND-between groups. Base lists must be explicit in source data;
+original defaults are not fabricated. PROC vehicle alternates and other enhanced
+prerequisite behavior remain pending. v5 persists group boundaries and bounds
+total member allocations during decoding, before accepting game state.

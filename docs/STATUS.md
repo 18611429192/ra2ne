@@ -345,3 +345,37 @@ Verification on Rust 1.99.0 / Linux:
 Overall 1.0 feature coverage is estimated at approximately 25%, with 75% still
 remaining. This is not an acceptance score or time estimate; see PROGRESS.md.
 Original resource/map/MOD acceptance remains pending, and 1.0 is incomplete.
+
+## 2026-10-04: generic prerequisite groups
+
+Added the six explicit General aliases POWER/FACTORY/BARRACKS/RADAR/TECH/PROC
+and custom GenericPrerequisites building groups. Custom entries override standard
+base lists. Each group requires any one owned building, and every named group
+must be satisfied. Exact IDs become singleton groups. Groups and members are
+canonicalized by stable type index, including duplicate removal. Consumed source
+properties no longer emit misleading pending-semantics diagnostics.
+
+Missing base lists, empty groups, unknown/non-building members and nested groups
+fail explicitly. Referenced PROC non-building alternates remain unsupported and
+fail rather than silently narrowing the requirement. Other Ares enhanced
+prerequisite logic is pending. This is not complete MOD compatibility.
+
+Full-game save/replay and TCP handshake formats are v5; v1–v4 are rejected.
+Decoding bounds 1024 groups/type, 1024 members/group and 1,000,000 members total.
+Group boundaries and members participate in hashes and persisted rules.
+
+Verification on Rust 1.99.0 / Linux:
+- 81 workspace tests, strict Clippy, formatting and Release builds pass.
+- New tests cover group OR/AND semantics, own/enemy buildings, standard/custom
+  overrides, malformed groups, canonical duplicate groups, production and
+  save/full-game replay round trips.
+- Runtime loads a multi-group fixture: 512 actors / 300 Ticks,
+  hash `0209355b371f7336`. Saving at 100 and restoring for 200 matches exactly.
+  This is a movement-only preview with grouped definitions, not original base
+  production acceptance; factory production is exercised by engine tests.
+- TCP secondary fixture: two independent 2,000-unit peers / 900 Ticks and
+  replay agree, 148,099 bytes, hash `61f44cf2f816d1d4`.
+
+Added a redistributable group-overlay fixture and source references. Overall
+1.0 feature coverage remains approximately 25%; original-content acceptance
+still needs major work. No new graphical/original-resource acceptance is claimed.

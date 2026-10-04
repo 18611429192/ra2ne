@@ -208,19 +208,73 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
             return Err(format!("[{}]: prerequisite limit exceeded", unit.id));
         }
         for id in &unit.prerequisites {
-            let index = *type_indices.get(&id.to_ascii_lowercase()).ok_or_else(|| {
-                format!(
-                    "[{}]: unresolved prerequisite {id}; generic aliases are unsupported",
-                    unit.id
-                )
-            })?;
-            if catalog.types[index].kind != TypeKind::Building {
+            let key = match id.to_ascii_lowercase().as_str() {
+                "power" => Some("PrerequisitePower"),
+                "factory" => Some("PrerequisiteFactory"),
+                "barracks" => Some("PrerequisiteBarracks"),
+                "radar" => Some("PrerequisiteRadar"),
+                "tech" => Some("PrerequisiteTech"),
+                "proc" => Some("PrerequisiteProc"),
+                _ => None,
+            };
+            let generic = rules.get("GenericPrerequisites", id);
+            let value =
+                if let Some(v) = generic {
+                    Some(v)
+                } else if let Some(key) = key {
+                    Some(rules.get("General", key).ok_or_else(|| {
+                        format!("[{}]: alias {id} requires [General] {key}", unit.id)
+                    })?)
+                } else {
+                    None
+                };
+            if id.eq_ignore_ascii_case("proc")
+                && rules
+                    .get("General", "PrerequisiteProcAlternate")
+                    .is_some_and(|v| {
+                        !v.entry.value.trim().is_empty()
+                            && !v.entry.value.eq_ignore_ascii_case("none")
+                    })
+            {
                 return Err(format!(
-                    "[{}]: prerequisite {id} is not a building",
+                    "[{}]: PROC non-building alternate prerequisite is unsupported",
                     unit.id
                 ));
             }
-            prerequisites.push(index);
+            let members: Vec<_> = if let Some(v) = value {
+                let prefix = format!(
+                    "{}:{}: [{}] {}:",
+                    v.source, v.entry.line, v.entry.section, v.entry.key
+                );
+                diagnostics.retain(|d| !d.starts_with(&prefix));
+                v.entry.list().collect()
+            } else {
+                vec![id.as_str()]
+            };
+            if members.is_empty() || members.len() > 1024 {
+                return Err(format!(
+                    "[{}]: empty or oversized prerequisite group {id}",
+                    unit.id
+                ));
+            }
+            let mut group = Vec::with_capacity(members.len());
+            for member in members {
+                let index = *type_indices
+                    .get(&member.to_ascii_lowercase())
+                    .ok_or_else(|| {
+                        format!("[{}]: unresolved prerequisite member {member}", unit.id)
+                    })?;
+                if catalog.types[index].kind != TypeKind::Building {
+                    return Err(format!(
+                        "[{}]: prerequisite {member} is not a building",
+                        unit.id
+                    ));
+                }
+                group.push(index);
+            }
+            group.sort_unstable();
+            group.dedup();
+            prerequisites.push(group);
         }
         prerequisites.sort_unstable();
         prerequisites.dedup();
@@ -310,6 +364,79 @@ mod tests {
                 .damage(20, Armor::Heavy),
             30
         );
+    }
+    #[test]
+    fn alias_groups_are_or_within_and_between_and_respect_overlays() {
+        let mut source = RuleSet::default();
+        source
+            .add_layer(
+                "base.ini",
+                include_str!("../../../fixtures/production-experiment.ini"),
+            )
+            .unwrap();
+        source
+            .add_layer(
+                "groups.ini",
+                include_str!("../../../fixtures/prerequisite-groups.ini"),
+            )
+            .unwrap();
+        let imported = import(&source, &policy()).unwrap();
+        let indices = imported.type_indices;
+        assert_eq!(
+            imported.rules.units[indices["testtank"]]
+                .production
+                .as_ref()
+                .unwrap()
+                .prerequisites,
+            vec![
+                vec![indices["testfactory"], indices["testbarracks"]],
+                vec![indices["testlab"]]
+            ]
+        );
+        assert_eq!(
+            imported.rules.units[indices["testinfantry"]]
+                .production
+                .as_ref()
+                .unwrap()
+                .prerequisites,
+            vec![vec![indices["testbarracks"], indices["testlab"]]]
+        );
+        source
+            .add_layer("mod.ini", "[GenericPrerequisites]\nFACTORY=TESTLAB\n")
+            .unwrap();
+        let modified = import(&source, &policy()).unwrap();
+        // Both required groups resolve to TESTLAB and canonicalize to one group.
+        assert_eq!(
+            modified.rules.units[indices["testtank"]]
+                .production
+                .as_ref()
+                .unwrap()
+                .prerequisites,
+            vec![vec![indices["testlab"]]]
+        );
+        for text in [
+            "[General]\nPrerequisiteTech=\n",
+            "[General]\nPrerequisiteTech=MISSING\n",
+            "[GenericPrerequisites]\nTRAINING=TESTTANK\n",
+            "[GenericPrerequisites]\nTRAINING=TRAINING\n",
+            "[TESTTANK]\nPrerequisite=PROC\n[General]\nPrerequisiteProc=TESTLAB\nPrerequisiteProcAlternate=TESTTANK\n",
+        ] {
+            let mut rules = RuleSet::default();
+            rules
+                .add_layer(
+                    "base.ini",
+                    include_str!("../../../fixtures/production-experiment.ini"),
+                )
+                .unwrap();
+            rules
+                .add_layer(
+                    "groups.ini",
+                    include_str!("../../../fixtures/prerequisite-groups.ini"),
+                )
+                .unwrap();
+            rules.add_layer("bad.ini", text).unwrap();
+            assert!(import(&rules, &policy()).is_err(), "{text}");
+        }
     }
     #[test]
     fn imported_factories_enforce_categories_prerequisites_and_replay() {

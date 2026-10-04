@@ -66,8 +66,8 @@ impl ProductionCategory {
 pub struct ProductionRules {
     pub category: ProductionCategory,
     pub factory_category: Option<ProductionCategory>,
-    /// Exact type IDs resolved to stable definition indices; all are required.
-    pub prerequisites: Vec<usize>,
+    /// All groups are required; any owned building within a group satisfies it.
+    pub prerequisites: Vec<Vec<usize>>,
 }
 impl UnitDef {
     /// Deterministic primary-first selection by armor eligibility. Range is
@@ -101,16 +101,20 @@ impl Rules {
         for unit in &self.units {
             if let Some(p) = &unit.production {
                 prerequisite_count = prerequisite_count
-                    .checked_add(p.prerequisites.len())
+                    .checked_add(p.prerequisites.iter().map(Vec::len).sum())
                     .ok_or("production rule size overflow")?;
                 if p.prerequisites.len() > 1024
                     || prerequisite_count > 1_000_000
-                    || p.prerequisites.iter().any(|&i| {
-                        i >= self.units.len()
-                            || self.units[i]
-                                .production
-                                .as_ref()
-                                .is_none_or(|r| r.category != ProductionCategory::Building)
+                    || p.prerequisites.iter().any(|group| {
+                        group.is_empty()
+                            || group.len() > 1024
+                            || group.iter().any(|&i| {
+                                i >= self.units.len()
+                                    || self.units[i]
+                                        .production
+                                        .as_ref()
+                                        .is_none_or(|r| r.category != ProductionCategory::Building)
+                            })
                     })
                     || p.factory_category.is_some()
                         && (p.category != ProductionCategory::Building || !unit.factory)
@@ -490,7 +494,9 @@ impl Skirmish {
                 .filter(|(_, a)| a.owner == player)
                 .map(|(_, a)| a.kind)
                 .collect();
-            !p.prerequisites.iter().all(|i| owned.contains(i))
+            !p.prerequisites
+                .iter()
+                .all(|group| group.iter().any(|i| owned.contains(i)))
         }) {
             return Err("missing production prerequisite");
         }
@@ -578,10 +584,11 @@ impl Skirmish {
             let kind = self.production[&factory].front().unwrap().kind;
             if power.get(&owner).copied().unwrap_or(0) < 0
                 || self.check_factory_category(actor.kind, kind).is_err()
-                || self.rules.units[kind]
-                    .production
-                    .as_ref()
-                    .is_some_and(|p| !p.prerequisites.iter().all(|&i| owned.contains(&(owner, i))))
+                || self.rules.units[kind].production.as_ref().is_some_and(|p| {
+                    !p.prerequisites
+                        .iter()
+                        .all(|group| group.iter().any(|&i| owned.contains(&(owner, i))))
+                })
             {
                 continue;
             }
@@ -883,8 +890,11 @@ impl Skirmish {
                 put(p.category as u64);
                 put(p.factory_category.map_or(u64::MAX, |c| c as u64));
                 put(p.prerequisites.len() as u64);
-                for &i in &p.prerequisites {
-                    put(i as u64);
+                for group in &p.prerequisites {
+                    put(group.len() as u64);
+                    for &i in group {
+                        put(i as u64);
+                    }
                 }
             }
             put(d.armor as u64);
@@ -970,13 +980,76 @@ mod tests {
         .unwrap()
     }
     #[test]
+    fn prerequisite_groups_require_each_group_but_only_one_owned_member() {
+        let mut game = game();
+        let rules = Arc::make_mut(&mut game.rules);
+        rules.units[0].production = Some(ProductionRules {
+            category: ProductionCategory::Vehicle,
+            factory_category: None,
+            prerequisites: vec![vec![2, 3], vec![4]],
+        });
+        rules.units[0].weapon = None;
+        let mut factory_def = rules.units[0].clone();
+        factory_def.name = "group-factory".into();
+        factory_def.factory = true;
+        factory_def.speed = 0;
+        factory_def.production = Some(ProductionRules {
+            category: ProductionCategory::Building,
+            factory_category: Some(ProductionCategory::Vehicle),
+            prerequisites: vec![],
+        });
+        rules.units.push(factory_def.clone());
+        for name in ["alternative-a", "alternative-b", "required-tech"] {
+            let mut def = factory_def.clone();
+            def.name = name.into();
+            def.factory = false;
+            def.production.as_mut().unwrap().factory_category = None;
+            rules.units.push(def);
+        }
+        rules.validate().unwrap();
+        let factory = game.spawn(0, 1, Vec2::new(1, 1)).unwrap();
+        game.spawn(1, 2, Vec2::new(15, 15)).unwrap();
+        game.spawn(0, 4, Vec2::new(2, 5)).unwrap();
+        let before = game.state_hash();
+        assert!(game.queue_production(0, factory, 0).is_err());
+        assert_eq!(game.state_hash(), before);
+        game.spawn(0, 3, Vec2::new(2, 6)).unwrap();
+        game.queue_production(0, factory, 0).unwrap();
+        let initial = game.save().unwrap();
+        let mut restored = Skirmish::load(&initial).unwrap();
+        let replay = commands::GameReplay {
+            initial,
+            ticks: 20,
+            commands: vec![],
+        };
+        for _ in 0..20 {
+            game.tick();
+            restored.tick();
+            assert_eq!(game.state_hash(), restored.state_hash());
+            assert_eq!(game.events(), restored.events());
+        }
+        assert!(game.entities().any(|(_, a)| a.owner == 0 && a.kind == 0));
+        assert_eq!(
+            commands::GameReplay::decode(&replay.encode().unwrap())
+                .unwrap()
+                .play(5)
+                .unwrap()
+                .game
+                .state_hash(),
+            game.state_hash()
+        );
+        let mut invalid = game.rules().clone();
+        invalid.units[0].production.as_mut().unwrap().prerequisites = vec![vec![]];
+        assert!(invalid.validate().is_err());
+    }
+    #[test]
     fn lost_prerequisite_pauses_paid_job_and_restoration_resumes_it() {
         let mut game = game();
         let rules = Arc::make_mut(&mut game.rules);
         rules.units[0].production = Some(ProductionRules {
             category: ProductionCategory::Vehicle,
             factory_category: None,
-            prerequisites: vec![2],
+            prerequisites: vec![vec![2]],
         });
         let mut factory_def = rules.units[0].clone();
         factory_def.name = "typed-factory".into();
@@ -1026,7 +1099,7 @@ mod tests {
         assert_eq!(game.players()[&0].credits, 900);
         assert!(game.entities().any(|(_, a)| a.owner == 0 && a.kind == 0));
         let mut invalid = game.rules().clone();
-        invalid.units[0].production.as_mut().unwrap().prerequisites = vec![0];
+        invalid.units[0].production.as_mut().unwrap().prerequisites = vec![vec![0]];
         assert!(invalid.validate().is_err());
     }
     #[test]
