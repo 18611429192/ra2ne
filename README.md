@@ -6,6 +6,7 @@ A modern, high-performance RTS runtime that reads users' own Red Alert 2 / Yuri'
 
 The repository includes an interactive renderer and synthetic skirmish, but RA2NE
 1.0 is not complete. It distributes no EA assets and has no legacy DLL dependency.
+Overall feature coverage is estimated at [approximately 25%](docs/PROGRESS.md).
 Implemented foundations include:
 
 - fixed 30 TPS simulation
@@ -29,6 +30,7 @@ Implemented foundations include:
 - experimental layered INI definitions driving a playable test scenario
 - standard armor and warhead Verses applied to damage and target acquisition
 - experimental primary/secondary weapon selection and pursuit
+- typed factories and exact owned-building production prerequisites
 
 ## Run
 

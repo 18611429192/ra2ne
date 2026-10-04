@@ -1,7 +1,7 @@
 //! Explicit experimental bridge from layered INI data to engine definitions.
 //! Conversion requires caller supplied timing/movement calibration. It does not
 //! establish original-game semantics; every omitted behavior is reported.
-use crate::{Armor, Rules, UnitDef, Verses, Weapon};
+use crate::{Armor, ProductionCategory, ProductionRules, Rules, UnitDef, Verses, Weapon};
 use ra2ne_assets::rules::{RuleSet, TypeKind};
 use std::collections::BTreeMap;
 
@@ -49,7 +49,7 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
             !(warheads.contains_key(&d.section.to_ascii_lowercase())
                 && d.key.eq_ignore_ascii_case("Verses")
                 || catalog.type_by_id(&d.section).is_some()
-                    && ["Power", "Harvester"]
+                    && ["Power", "Harvester", "Factory", "Naval"]
                         .iter()
                         .any(|k| k.eq_ignore_ascii_case(&d.key)))
         })
@@ -62,7 +62,12 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
         .collect();
     diagnostics.push("experimental rule import: production timing and movement use caller calibration; original gameplay compatibility is unverified".into());
     let mut units = Vec::with_capacity(catalog.types.len());
-    let mut type_indices = BTreeMap::new();
+    let type_indices: BTreeMap<_, _> = catalog
+        .types
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.id.to_ascii_lowercase(), i))
+        .collect();
     for unit in &catalog.types {
         if unit.kind == TypeKind::Aircraft {
             return Err(format!("[{}]: aircraft movement is unsupported", unit.id));
@@ -124,7 +129,6 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
             .map(&mut compile_weapon)
             .transpose()?;
         for (key, present) in [
-            ("Prerequisite", !unit.prerequisites.is_empty()),
             ("Owner", !unit.owners.is_empty()),
             ("Sight", unit.sight.0 != 0),
             ("Image", unit.image.is_some()),
@@ -162,20 +166,75 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
                 unit.id
             ));
         }
-        // A Factory tag is a category, not an unrestricted engine factory.
-        if rules.get(&unit.id, "Factory").is_some() {
-            diagnostics.push(format!(
-                "[{}]: Factory category is not implemented; production disabled",
+        let naval = rules.get(&unit.id, "Naval").map_or(Ok(false), |v| {
+            v.entry
+                .boolean()
+                .map_err(|e| format!("{}:{}: [{}] Naval: {e}", v.source, v.entry.line, unit.id))
+        })?;
+        if naval {
+            return Err(format!(
+                "[{}]: naval movement/production is unsupported",
                 unit.id
             ));
         }
-        type_indices.insert(unit.id.to_ascii_lowercase(), units.len());
+        let category = match unit.kind {
+            TypeKind::Vehicle => ProductionCategory::Vehicle,
+            TypeKind::Infantry => ProductionCategory::Infantry,
+            TypeKind::Aircraft => ProductionCategory::Aircraft,
+            TypeKind::Building => ProductionCategory::Building,
+        };
+        let factory_category = rules
+            .get(&unit.id, "Factory")
+            .map(
+                |v| match v.entry.value.trim().to_ascii_lowercase().as_str() {
+                    "unittype" => Ok(Some(ProductionCategory::Vehicle)),
+                    "infantrytype" => Ok(Some(ProductionCategory::Infantry)),
+                    "aircrafttype" => Ok(Some(ProductionCategory::Aircraft)),
+                    "buildingtype" => Ok(Some(ProductionCategory::Building)),
+                    "none" => Ok(None),
+                    _ => Err(format!(
+                        "{}:{}: [{}] unknown Factory category",
+                        v.source, v.entry.line, unit.id
+                    )),
+                },
+            )
+            .transpose()?
+            .flatten();
+        if factory_category.is_some() && unit.kind != TypeKind::Building {
+            return Err(format!("[{}]: only buildings can be factories", unit.id));
+        }
+        let mut prerequisites = Vec::new();
+        if unit.prerequisites.len() > 1024 {
+            return Err(format!("[{}]: prerequisite limit exceeded", unit.id));
+        }
+        for id in &unit.prerequisites {
+            let index = *type_indices.get(&id.to_ascii_lowercase()).ok_or_else(|| {
+                format!(
+                    "[{}]: unresolved prerequisite {id}; generic aliases are unsupported",
+                    unit.id
+                )
+            })?;
+            if catalog.types[index].kind != TypeKind::Building {
+                return Err(format!(
+                    "[{}]: prerequisite {id} is not a building",
+                    unit.id
+                ));
+            }
+            prerequisites.push(index);
+        }
+        prerequisites.sort_unstable();
+        prerequisites.dedup();
         let armor = unit
             .armor
             .as_ref()
             .map_or(Ok(Armor::None), |s| Armor::parse(s))
             .map_err(|e| format!("[{}]: Armor: {e}", unit.id))?;
         units.push(UnitDef {
+            production: Some(ProductionRules {
+                category,
+                factory_category,
+                prerequisites,
+            }),
             armor,
             name: unit.id.clone(),
             health: unit.strength,
@@ -185,7 +244,7 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
             secondary,
             build_ticks: policy.build_ticks,
             power,
-            factory: false,
+            factory: factory_category.is_some(),
             harvester,
         });
     }
@@ -251,6 +310,112 @@ mod tests {
                 .damage(20, Armor::Heavy),
             30
         );
+    }
+    #[test]
+    fn imported_factories_enforce_categories_prerequisites_and_replay() {
+        use crate::{Player, Skirmish};
+        use ra2ne_core::{Vec2, navigation::NavigationMap};
+        use std::sync::Arc;
+        let mut source = RuleSet::default();
+        source
+            .add_layer(
+                "production.ini",
+                include_str!("../../../fixtures/production-experiment.ini"),
+            )
+            .unwrap();
+        let imported = import(&source, &policy()).unwrap();
+        let indices = imported.type_indices;
+        let tank = indices["testtank"];
+        let infantry = indices["testinfantry"];
+        let mut game = Skirmish::new(
+            Arc::new(imported.rules),
+            NavigationMap::new(20, 20),
+            BTreeMap::from([
+                (
+                    0,
+                    Player {
+                        credits: 5000,
+                        defeated: false,
+                    },
+                ),
+                (
+                    1,
+                    Player {
+                        credits: 5000,
+                        defeated: false,
+                    },
+                ),
+            ]),
+        )
+        .unwrap();
+        let factory = game
+            .spawn(0, indices["testfactory"], Vec2::new(1, 1))
+            .unwrap();
+        let barracks = game
+            .spawn(0, indices["testbarracks"], Vec2::new(1, 5))
+            .unwrap();
+        game.spawn(1, indices["testlab"], Vec2::new(15, 15))
+            .unwrap();
+        let before = game.state_hash();
+        assert_eq!(
+            game.queue_production(0, factory, tank),
+            Err("missing production prerequisite")
+        );
+        assert_eq!(
+            game.queue_production(0, factory, infantry),
+            Err("factory cannot produce this category")
+        );
+        assert_eq!(game.state_hash(), before);
+        game.spawn(0, indices["testlab"], Vec2::new(2, 6)).unwrap();
+        game.queue_production(0, factory, tank).unwrap();
+        assert_eq!(game.players()[&0].credits, 4300);
+        game.cancel_production(0, factory, 0).unwrap();
+        assert_eq!(game.players()[&0].credits, 5000);
+        game.queue_production(0, factory, tank).unwrap();
+        game.queue_production(0, barracks, infantry).unwrap();
+        let initial = game.save().unwrap();
+        let mut restored = Skirmish::load(&initial).unwrap();
+        let replay = crate::commands::GameReplay {
+            initial,
+            ticks: 50,
+            commands: vec![],
+        };
+        for _ in 0..50 {
+            game.tick();
+            restored.tick();
+            assert_eq!(game.state_hash(), restored.state_hash());
+            assert_eq!(game.events(), restored.events());
+        }
+        assert!(game.entities().any(|(_, a)| a.owner == 0 && a.kind == tank));
+        assert!(
+            game.entities()
+                .any(|(_, a)| a.owner == 0 && a.kind == infantry)
+        );
+        assert!(game.production(factory).is_none());
+        assert_eq!(
+            crate::commands::GameReplay::decode(&replay.encode().unwrap())
+                .unwrap()
+                .play(5)
+                .unwrap()
+                .game
+                .state_hash(),
+            game.state_hash()
+        );
+        for overlay in [
+            "[TESTTANK]\nPrerequisite=FACTORY\n",
+            "[TESTFACTORY]\nFactory=unknown\n",
+            "[TESTFACTORY]\nNaval=yes\n",
+            "[TESTTANK]\nPrerequisite=TESTINFANTRY\n",
+        ] {
+            let mut r = RuleSet::default();
+            r.add_layer(
+                "base.ini",
+                include_str!("../../../fixtures/production-experiment.ini"),
+            )
+            .unwrap();
+            r.add_layer("bad.ini", overlay).unwrap();
+            assert!(import(&r, &policy()).is_err());
+        }
     }
     #[test]
     fn secondary_definitions_and_their_overlays_are_compiled() {

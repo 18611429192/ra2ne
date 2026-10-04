@@ -29,10 +29,11 @@ order remains stable, and type IDs match without ASCII case sensitivity.
 | Harvester | Checked boolean; synthetic harvesting behavior with warning |
 | BuildingTypes | Stationary definitions; no original construction/footprint behavior |
 | AircraftTypes | Import fails; air movement is unavailable |
-| Factory | Preserved with diagnostic; production disabled to avoid ignoring categories |
+| Factory | Typed building factories; UnitType/InfantryType products enforced |
 | Armor | Eleven standard armor slots; unknown/custom armor rejected |
 | Warhead Verses | Exactly eleven percentages; exact thousandths of a percent; target armor scales direct damage |
-| Prerequisite, Owner, Sight | Preserved with explicit omitted-behavior diagnostics |
+| Prerequisite | Exact registered building IDs, all required and owned by the player |
+| Owner, Sight | Preserved with explicit omitted-behavior diagnostics |
 | Projectile and other warhead properties | Immediate direct hits; other properties retained with diagnostics |
 | Other properties | Retained by asset frontend, source/line diagnostics |
 
@@ -62,7 +63,7 @@ disable automatic acquisition. Retaliation is not implemented. Original damage
 rounding, minimum damage, splash/falloff and immunity flags remain unverified or
 unsupported; this is not complete original warhead behavior.
 
-Full-game saves/replays and TCP handshakes are now v3. v1/v2 full-game artifacts
+Full-game saves/replays and TCP handshakes are now v4. v1/v2/v3 full-game artifacts
 and peers are rejected; there is no migration adapter. Movement/map checkpoints
 and input-frame encoding remain v1. Imported armor and every multiplier are
 included in the game state hash and engine saves.
@@ -84,3 +85,26 @@ Pursuit stops at the selected weapon's range. Secondary-only types work.
 Elite weapons, ammo, AA/AG filters, wall/deploy/transport special selection and
 NoSecondaryWeaponFallback extensions remain unsupported. These are explicit
 experimental rules, not complete original selection behavior.
+
+
+Typed production now applies exact building prerequisites when reserving a job.
+An enemy building does not satisfy ownership. A lost prerequisite pauses an
+already-paid job without another charge, and restoring it resumes the job.
+Power and owned-type membership are snapshotted once per Tick for production.
+Queues retain their existing refund and blocked-exit behavior. Initial population
+and scripted spawn do not require prerequisites.
+
+`Factory=UnitType` and `Factory=InfantryType` identify supported factory product
+categories. `AircraftType` and `BuildingType` are retained as typed factory
+categories, but aircraft production/building placement are rejected. Factories
+must be registered buildings. Unknown categories, naval units/factories, missing
+prerequisite IDs and non-building prerequisites fail. Generic aliases such as
+FACTORY/BARRACKS, faction Owner overlap, TechLevel, stolen tech, naval separation,
+original production timing and construction remain unsupported. Synthetic legacy
+factories without typed restrictions retain their fixture behavior.
+
+The library fixture `fixtures/production-experiment.ini` exercises vehicle and
+infantry factories with an exact laboratory prerequisite. It is covered by
+`cargo test -p ra2ne-game imported_factories_enforce_categories_prerequisites_and_replay`.
+The runtime's two-army rule preview does not yet auto-place factories or provide
+an original build sidebar; this test is not original skirmish acceptance.

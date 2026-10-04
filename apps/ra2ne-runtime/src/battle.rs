@@ -87,6 +87,7 @@ fn handles(game: &Skirmish, ids: &[usize]) -> Result<Vec<EntityId>, &'static str
 }
 pub fn synthetic(map: NavigationMap, count: usize) -> Result<Skirmish, &'static str> {
     let tank = UnitDef {
+        production: None,
         secondary: None,
         armor: ra2ne_game::Armor::None,
         name: "Tank".into(),

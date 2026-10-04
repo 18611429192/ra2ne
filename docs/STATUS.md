@@ -308,3 +308,40 @@ Verified on Rust 1.99.0 / Linux:
 Added a redistributable secondary-overlay fixture and documented selection
 boundaries. No new graphical/original-resource acceptance is claimed; 1.0
 remains incomplete.
+
+## 2026-10-04: typed factories and exact building prerequisites
+
+Imported definitions now carry product category, optional factory category and
+resolved exact prerequisite building indices. Vehicle/infantry factory categories
+are enforced before payment; the owning player must have every prerequisite.
+Missing prerequisites pause existing paid jobs, and restoration resumes them.
+Production snapshots power and owned types once per Tick instead of scanning
+all entities for every factory's power check. Initial population/spawn remains
+independent of prerequisite gates.
+
+Unknown factory categories, non-building factories/prerequisites, unresolved
+aliases, naval definitions and unsupported aircraft/building production fail.
+Generic aliases, faction overlap, TechLevel, stolen tech and original build
+timing remain pending. Building placement and an original build sidebar are
+not added by this batch. Synthetic untyped factories retain fixture semantics.
+
+Restrictions are hashed and saved; queued categories are checked on restore.
+Full-game saves/replays and TCP handshakes advance to v4. Limits are 1024
+prerequisites per type and 1,000,000 total, including bounded decoding.
+
+Verification on Rust 1.99.0 / Linux:
+- 79 workspace tests, strict Clippy, formatting and Release builds pass.
+- Independent synthetic INI fixture tests category rejection, same-player exact
+  prerequisites, enemy prerequisite exclusion, atomic rejection, credit
+  reservation/refund, real vehicle/infantry production, save and full replay.
+- A combat test destroys a prerequisite; the paid job pauses, survives save/load,
+  and resumes when the owned building is restored, with matching future events.
+- TCP secondary fixture: 2,000 units / two peers / 900 Ticks, 148,099-byte replay,
+  hash `61f44cf2f816d1d4`.
+- Sustained combat: 10,000 units / 900 Ticks / 31 matching checkpoints,
+  hash `81fcc0038225b6df`, 2.600 ms/Tick with concurrent regression processes.
+- Synthetic runtime: 516 initial actors / 900 Ticks, hash `2cb632011ad0e9e5`.
+
+Overall 1.0 feature coverage is estimated at approximately 25%, with 75% still
+remaining. This is not an acceptance score or time estimate; see PROGRESS.md.
+Original resource/map/MOD acceptance remains pending, and 1.0 is incomplete.

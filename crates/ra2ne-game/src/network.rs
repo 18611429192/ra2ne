@@ -50,7 +50,7 @@ impl Peer {
             outgoing: VecDeque::new(),
             written: 0,
         };
-        let mut hello = b"RA2NETP3".to_vec();
+        let mut hello = b"RA2NETP4".to_vec();
         hello.extend_from_slice(&session.token);
         hello.extend_from_slice(&local_player.to_le_bytes());
         hello.extend_from_slice(&session.tick.to_le_bytes());
@@ -146,7 +146,7 @@ impl Peer {
                 let message = &self.incoming[4..size + 4];
                 if !self.ready {
                     if message.len() != 44
-                        || &message[..8] != b"RA2NETP3"
+                        || &message[..8] != b"RA2NETP4"
                         || message[8..24] != self.session.token
                         || u32::from_le_bytes(message[24..28].try_into().unwrap())
                             != self.remote_player

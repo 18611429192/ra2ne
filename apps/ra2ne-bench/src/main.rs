@@ -327,6 +327,7 @@ fn game_check() {
     assert!((2..=100_000).contains(&count) && ticks > 0);
     let rules = Arc::new(Rules {
         units: vec![UnitDef {
+            production: None,
             secondary: None,
             armor: ra2ne_game::Armor::None,
             name: "test-tank".into(),
@@ -415,6 +416,7 @@ fn network_check() {
     assert!((2..=20_000).contains(&count) && (1..=1_000_000).contains(&ticks));
     let rules = Arc::new(Rules {
         units: vec![UnitDef {
+            production: None,
             secondary: Some(Weapon {
                 verses: ra2ne_game::Verses::default(),
                 damage: 10,

@@ -28,6 +28,7 @@ pub struct Weapon {
 }
 #[derive(Clone, Debug)]
 pub struct UnitDef {
+    pub production: Option<ProductionRules>,
     pub armor: Armor,
     pub name: String,
     pub health: u32,
@@ -39,6 +40,34 @@ pub struct UnitDef {
     pub power: i32,
     pub factory: bool,
     pub harvester: bool,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum ProductionCategory {
+    Vehicle,
+    Infantry,
+    Aircraft,
+    Building,
+}
+impl ProductionCategory {
+    pub fn from_index(value: u32) -> Result<Self, &'static str> {
+        [
+            Self::Vehicle,
+            Self::Infantry,
+            Self::Aircraft,
+            Self::Building,
+        ]
+        .get(value as usize)
+        .copied()
+        .ok_or("invalid production category")
+    }
+}
+#[derive(Clone, Debug)]
+pub struct ProductionRules {
+    pub category: ProductionCategory,
+    pub factory_category: Option<ProductionCategory>,
+    /// Exact type IDs resolved to stable definition indices; all are required.
+    pub prerequisites: Vec<usize>,
 }
 impl UnitDef {
     /// Deterministic primary-first selection by armor eligibility. Range is
@@ -68,7 +97,28 @@ impl Rules {
             return Err("invalid game rule limits");
         }
         let mut names = BTreeSet::new();
+        let mut prerequisite_count = 0usize;
         for unit in &self.units {
+            if let Some(p) = &unit.production {
+                prerequisite_count = prerequisite_count
+                    .checked_add(p.prerequisites.len())
+                    .ok_or("production rule size overflow")?;
+                if p.prerequisites.len() > 1024
+                    || prerequisite_count > 1_000_000
+                    || p.prerequisites.iter().any(|&i| {
+                        i >= self.units.len()
+                            || self.units[i]
+                                .production
+                                .as_ref()
+                                .is_none_or(|r| r.category != ProductionCategory::Building)
+                    })
+                    || p.factory_category.is_some()
+                        && (p.category != ProductionCategory::Building || !unit.factory)
+                    || unit.factory && p.factory_category.is_none()
+                {
+                    return Err("invalid production restrictions");
+                }
+            }
             if unit.name.is_empty()
                 || unit.name.len() > 4096
                 || !names.insert(unit.name.to_ascii_lowercase())
@@ -433,6 +483,17 @@ impl Skirmish {
             return Err("entity is not a factory");
         }
         let definition = self.rules.units.get(kind).ok_or("unknown unit type")?;
+        self.check_factory_category(actor.kind, kind)?;
+        if definition.production.as_ref().is_some_and(|p| {
+            let owned: BTreeSet<_> = self
+                .entities()
+                .filter(|(_, a)| a.owner == player)
+                .map(|(_, a)| a.kind)
+                .collect();
+            !p.prerequisites.iter().all(|i| owned.contains(i))
+        }) {
+            return Err("missing production prerequisite");
+        }
         if self.production.get(&factory).is_some_and(|q| q.len() >= 32) {
             return Err("production queue full");
         }
@@ -476,14 +537,52 @@ impl Skirmish {
             .map(|(_, a)| i64::from(self.rules.units[a.kind].power))
             .sum()
     }
+    fn check_factory_category(&self, factory: usize, product: usize) -> Result<(), &'static str> {
+        if let Some(p) = &self.rules.units[product].production {
+            if matches!(
+                p.category,
+                ProductionCategory::Building | ProductionCategory::Aircraft
+            ) {
+                return Err("building placement and aircraft production are unsupported");
+            }
+            if self.rules.units[factory]
+                .production
+                .as_ref()
+                .and_then(|f| f.factory_category)
+                != Some(p.category)
+            {
+                return Err("factory cannot produce this category");
+            }
+        } else if self.rules.units[factory].production.is_some() {
+            return Err("typed factory cannot produce an unclassified type");
+        }
+        Ok(())
+    }
     fn advance_production(&mut self) {
+        if self.production.is_empty() {
+            return;
+        }
+        // One snapshot per Tick, not a full entity scan per queued factory.
+        let mut power = BTreeMap::<u32, i64>::new();
+        let mut owned = BTreeSet::new();
+        for (_, actor) in self.entities() {
+            *power.entry(actor.owner).or_default() += i64::from(self.rules.units[actor.kind].power);
+            owned.insert((actor.owner, actor.kind));
+        }
         let factories: Vec<_> = self.production.keys().copied().collect();
         for factory in factories {
             let Some(actor) = self.actor(factory) else {
                 continue;
             };
             let owner = actor.owner;
-            if self.power_balance(owner) < 0 {
+            let kind = self.production[&factory].front().unwrap().kind;
+            if power.get(&owner).copied().unwrap_or(0) < 0
+                || self.check_factory_category(actor.kind, kind).is_err()
+                || self.rules.units[kind]
+                    .production
+                    .as_ref()
+                    .is_some_and(|p| !p.prerequisites.iter().all(|&i| owned.contains(&(owner, i))))
+            {
                 continue;
             }
             let job = self
@@ -779,6 +878,15 @@ impl Skirmish {
             }
         }
         for d in &self.rules.units {
+            put(u64::from(d.production.is_some()));
+            if let Some(p) = &d.production {
+                put(p.category as u64);
+                put(p.factory_category.map_or(u64::MAX, |c| c as u64));
+                put(p.prerequisites.len() as u64);
+                for &i in &p.prerequisites {
+                    put(i as u64);
+                }
+            }
             put(d.armor as u64);
             for &b in d.name.as_bytes() {
                 put(u64::from(b));
@@ -819,6 +927,7 @@ mod tests {
     pub(super) fn game() -> Skirmish {
         let rules = Arc::new(Rules {
             units: vec![UnitDef {
+                production: None,
                 secondary: None,
                 armor: Armor::None,
                 name: "tank".into(),
@@ -859,6 +968,66 @@ mod tests {
             ]),
         )
         .unwrap()
+    }
+    #[test]
+    fn lost_prerequisite_pauses_paid_job_and_restoration_resumes_it() {
+        let mut game = game();
+        let rules = Arc::make_mut(&mut game.rules);
+        rules.units[0].production = Some(ProductionRules {
+            category: ProductionCategory::Vehicle,
+            factory_category: None,
+            prerequisites: vec![2],
+        });
+        let mut factory_def = rules.units[0].clone();
+        factory_def.name = "typed-factory".into();
+        factory_def.factory = true;
+        factory_def.weapon = None;
+        factory_def.speed = 0;
+        factory_def.production = Some(ProductionRules {
+            category: ProductionCategory::Building,
+            factory_category: Some(ProductionCategory::Vehicle),
+            prerequisites: vec![],
+        });
+        let mut lab_def = factory_def.clone();
+        lab_def.name = "lab".into();
+        lab_def.factory = false;
+        lab_def.production.as_mut().unwrap().factory_category = None;
+        let mut killer = rules.units[0].clone();
+        killer.name = "lab-killer".into();
+        killer.production.as_mut().unwrap().prerequisites.clear();
+        killer.weapon.as_mut().unwrap().damage = 100;
+        killer.weapon.as_mut().unwrap().range = 1;
+        rules.units.extend([factory_def, lab_def, killer]);
+        rules.validate().unwrap();
+        let factory = game.spawn(0, 1, Vec2::new(1, 1)).unwrap();
+        let lab = game.spawn(0, 2, Vec2::new(10, 10)).unwrap();
+        game.spawn(1, 3, Vec2::new(11, 10)).unwrap();
+        game.queue_production(0, factory, 0).unwrap();
+        game.tick();
+        assert!(game.actor(lab).is_none());
+        assert_eq!(game.production(factory).unwrap()[0].remaining, 10);
+        assert_eq!(game.players()[&0].credits, 900);
+        let mut restored = Skirmish::load(&game.save().unwrap()).unwrap();
+        for _ in 0..10 {
+            game.tick();
+            restored.tick();
+            assert_eq!(game.state_hash(), restored.state_hash());
+        }
+        assert_eq!(game.production(factory).unwrap()[0].remaining, 10);
+        game.spawn(0, 2, Vec2::new(15, 15)).unwrap();
+        restored.spawn(0, 2, Vec2::new(15, 15)).unwrap();
+        for _ in 0..10 {
+            game.tick();
+            restored.tick();
+            assert_eq!(game.state_hash(), restored.state_hash());
+            assert_eq!(game.events(), restored.events());
+        }
+        assert!(game.production(factory).is_none());
+        assert_eq!(game.players()[&0].credits, 900);
+        assert!(game.entities().any(|(_, a)| a.owner == 0 && a.kind == 0));
+        let mut invalid = game.rules().clone();
+        invalid.units[0].production.as_mut().unwrap().prerequisites = vec![0];
+        assert!(invalid.validate().is_err());
     }
     #[test]
     fn stationary_game_hash_distinguishes_ticks() {

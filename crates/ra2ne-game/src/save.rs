@@ -15,7 +15,7 @@ fn read_id(r: &mut Reader<'_>) -> Result<EntityId, &'static str> {
 impl Skirmish {
     pub fn save(&self) -> Result<Vec<u8>, &'static str> {
         let mut w = Writer::new();
-        w.0.extend_from_slice(b"RA2NEGS3");
+        w.0.extend_from_slice(b"RA2NEGS4");
         w.u64(self.tick);
         w.boolean(self.started_with_opponents);
         w.boolean(self.finished);
@@ -26,6 +26,18 @@ impl Skirmish {
         w.u64(self.rules.max_entities as u64);
         w.u64(self.rules.units.len() as u64);
         for def in &self.rules.units {
+            w.boolean(def.production.is_some());
+            if let Some(p) = &def.production {
+                w.u32(p.category as u32);
+                w.boolean(p.factory_category.is_some());
+                if let Some(c) = p.factory_category {
+                    w.u32(c as u32);
+                }
+                w.u64(p.prerequisites.len() as u64);
+                for &i in &p.prerequisites {
+                    w.u64(i as u64);
+                }
+            }
             w.u32(def.armor as u32);
             w.bytes(def.name.as_bytes());
             w.u32(def.health);
@@ -103,7 +115,7 @@ impl Skirmish {
     }
     pub fn load(bytes: &[u8]) -> Result<Self, &'static str> {
         let mut r = Reader::new(bytes)?;
-        if r.take(8)? != b"RA2NEGS3" {
+        if r.take(8)? != b"RA2NEGS4" {
             return Err("unsupported game save");
         }
         let tick = r.u64()?;
@@ -113,7 +125,34 @@ impl Skirmish {
         let max_entities = r.count(100_000)?;
         let definitions = r.count(100_000)?;
         let mut units = Vec::with_capacity(definitions);
+        let mut prerequisite_count = 0usize;
         for _ in 0..definitions {
+            let production = if r.boolean()? {
+                let category = ProductionCategory::from_index(r.u32()?)?;
+                let factory_category = if r.boolean()? {
+                    Some(ProductionCategory::from_index(r.u32()?)?)
+                } else {
+                    None
+                };
+                let n = r.count(1024)?;
+                prerequisite_count = prerequisite_count
+                    .checked_add(n)
+                    .ok_or("prerequisite size overflow")?;
+                if prerequisite_count > 1_000_000 {
+                    return Err("prerequisite total exceeds limit");
+                }
+                let mut prerequisites = Vec::with_capacity(n);
+                for _ in 0..n {
+                    prerequisites.push(r.count(definitions)?);
+                }
+                Some(ProductionRules {
+                    category,
+                    factory_category,
+                    prerequisites,
+                })
+            } else {
+                None
+            };
             let armor = Armor::from_index(r.u32()?)?;
             let name = std::str::from_utf8(r.bytes(4096)?)
                 .map_err(|_| "invalid save rule name")?
@@ -144,6 +183,7 @@ impl Skirmish {
             let weapon = read_weapon()?;
             let secondary = read_weapon()?;
             units.push(UnitDef {
+                production,
                 armor,
                 name,
                 health,
@@ -321,6 +361,7 @@ impl Skirmish {
                     .units
                     .get(kind)
                     .ok_or("invalid production kind")?;
+                game.check_factory_category(actor.kind, kind)?;
                 if remaining > def.build_ticks || paid != def.cost {
                     return Err("invalid saved production job");
                 }
