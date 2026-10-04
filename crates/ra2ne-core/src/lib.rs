@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 pub mod navigation;
+pub mod replay;
 use navigation::{NavigationMap, SharedRoute};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -14,6 +14,7 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 - pure-simulation benchmark for 10,000 units
 - shared reverse-BFS paths for batch movement on bounded walkability grids
 - deterministic bridge entry limits and waiting/arrival/unreachable states
+- tick-stamped command playback and checkpoint-based replay verification
 - no rendering, assets, or compatibility code yet
 
 ## Run
@@ -22,6 +23,12 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 cargo test --workspace
 cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900
 cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900 --scenario=bridge
+```
+
+Replay determinism smoke check (two playbacks with reversed command arrival):
+
+```bash
+cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900 --replay-check
 ```
 
 ## Project principles
