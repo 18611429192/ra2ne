@@ -189,6 +189,203 @@ mod tests {
         )
     }
     #[test]
+    fn tcp_production_cancel_and_rejections_match_both_peers_and_replay() {
+        use crate::{
+            Player, Skirmish,
+            commands::{Action, Command, GameReplay},
+            rule_import::{self, ImportPolicy},
+        };
+        use ra2ne_assets::rules::RuleSet;
+        use ra2ne_core::{Vec2, navigation::NavigationMap};
+        use std::{collections::BTreeMap, sync::Arc};
+        let mut source = RuleSet::default();
+        source
+            .add_layer(
+                "fixture",
+                include_str!("../../../fixtures/production-experiment.ini"),
+            )
+            .unwrap();
+        let imported = rule_import::import(
+            &source,
+            &ImportPolicy {
+                speed_table: BTreeMap::from([(5, 1)]),
+                build_ticks: 5,
+                rof_numerator: 1,
+                rof_denominator: 1,
+                max_entities: 100,
+            },
+        )
+        .unwrap();
+        let tank = imported.type_indices["testtank"];
+        let infantry = imported.type_indices["testinfantry"];
+        let mut a = Skirmish::new(
+            Arc::new(imported.rules),
+            NavigationMap::new(64, 64),
+            BTreeMap::from([
+                (
+                    0,
+                    Player {
+                        credits: 2000,
+                        defeated: false,
+                    },
+                ),
+                (
+                    1,
+                    Player {
+                        credits: 2000,
+                        defeated: false,
+                    },
+                ),
+            ]),
+        )
+        .unwrap();
+        let mut factories = Vec::new();
+        for owner in 0..=1 {
+            let x = 4 + owner as i32 * 40;
+            factories.push(
+                a.spawn(owner, imported.type_indices["testfactory"], Vec2::new(x, 4))
+                    .unwrap(),
+            );
+            a.spawn(
+                owner,
+                imported.type_indices["testbarracks"],
+                Vec2::new(x, 10),
+            )
+            .unwrap();
+            a.spawn(owner, imported.type_indices["testlab"], Vec2::new(x, 16))
+                .unwrap();
+        }
+        let initial = a.save().unwrap();
+        let mut b = Skirmish::load(&initial).unwrap();
+        let commands = vec![
+            Command {
+                tick: 0,
+                player: 0,
+                sequence: 0,
+                action: Action::Produce {
+                    factory: factories[0],
+                    kind: tank,
+                },
+            },
+            Command {
+                tick: 0,
+                player: 0,
+                sequence: 1,
+                action: Action::Produce {
+                    factory: factories[0],
+                    kind: tank,
+                },
+            },
+            Command {
+                tick: 0,
+                player: 1,
+                sequence: 0,
+                action: Action::Produce {
+                    factory: factories[1],
+                    kind: tank,
+                },
+            },
+            Command {
+                tick: 1,
+                player: 0,
+                sequence: 2,
+                action: Action::Cancel {
+                    factory: factories[0],
+                    index: 1,
+                },
+            },
+            Command {
+                tick: 2,
+                player: 1,
+                sequence: 1,
+                action: Action::Produce {
+                    factory: factories[1],
+                    kind: infantry,
+                },
+            },
+            Command {
+                tick: 3,
+                player: 1,
+                sequence: 2,
+                action: Action::Cancel {
+                    factory: factories[0],
+                    index: 0,
+                },
+            },
+        ];
+        let replay = GameReplay {
+            initial,
+            ticks: 12,
+            commands: commands.clone(),
+        };
+        let expected = GameReplay::decode(&replay.encode().unwrap())
+            .unwrap()
+            .play(1)
+            .unwrap();
+        assert_eq!(expected.rejected.len(), 2);
+        let session = Session {
+            token: [53; 16],
+            initial_hash: a.state_hash(),
+            tick: 0,
+        };
+        let (mut left, mut right) = peers(session, session);
+        let mut left_barrier = GameLockstep::new([0, 1], 0, 2).unwrap();
+        let mut right_barrier = GameLockstep::new([0, 1], 0, 2).unwrap();
+        for tick in 0..12 {
+            for player in 0..=1 {
+                let frame = Frame {
+                    tick,
+                    player,
+                    commands: commands
+                        .iter()
+                        .filter(|c| c.tick == tick && c.player == player)
+                        .cloned()
+                        .collect(),
+                };
+                if player == 0 {
+                    left.send(&frame).unwrap();
+                    left_barrier.submit(0, frame).unwrap();
+                } else {
+                    right.send(&frame).unwrap();
+                    right_barrier.submit(1, frame).unwrap();
+                }
+            }
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !left_barrier.missing_players().is_empty()
+                || !right_barrier.missing_players().is_empty()
+            {
+                for frame in left.poll().unwrap() {
+                    left_barrier.submit(1, frame).unwrap();
+                }
+                for frame in right.poll().unwrap() {
+                    right_barrier.submit(0, frame).unwrap();
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let mut rejected_a = Vec::new();
+            for c in left_barrier.take_ready().unwrap() {
+                if let Err(reason) = c.action.apply(&mut a, c.player) {
+                    rejected_a.push((c.sequence, reason));
+                }
+            }
+            let mut rejected_b = Vec::new();
+            for c in right_barrier.take_ready().unwrap() {
+                if let Err(reason) = c.action.apply(&mut b, c.player) {
+                    rejected_b.push((c.sequence, reason));
+                }
+            }
+            assert_eq!(rejected_a, rejected_b);
+            a.tick();
+            b.tick();
+            assert_eq!(a.state_hash(), b.state_hash());
+            assert_eq!(a.state_hash(), expected.checkpoints[tick as usize].1);
+        }
+        assert_eq!(a.players()[&0].credits, 1300);
+        assert_eq!(a.players()[&1].credits, 1300);
+        assert_eq!(a.entities().count(), 8);
+    }
+    #[test]
     fn real_loopback_tcp_handshake_frames_and_input_barrier() {
         let session = Session {
             token: [71; 16],

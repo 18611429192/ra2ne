@@ -154,9 +154,40 @@ cargo run -p ra2ne-runtime -- --units=8 \
 The experimental sidebar uses the selected owned factory, or the first owned
 factory when none is selected. Mobile definitions are paged with cost and
 availability; hovering a disabled product shows the engine's rejection reason.
-Click an available product to queue it, or cancel the first job for a full refund.
+Click an available product to queue it, or click any paged queue entry to cancel it for a full refund.
 The queue displays its length and first job's remaining simulation ticks; low
 power is displayed as a pause. B queues the first eligible product at that
 factory. This is local preview input, not a multiplayer build interface.
 Existing `--save-game=PATH` / `--load-game=PATH` preserve bases and paid queues.
 Formats remain v5 because no serialized gameplay state changed.
+
+
+## Record and verify runtime input
+
+`--record-replay=PATH` records a battle/rule-preview session in the existing v5
+full-game replay format. Movement, stop, attack, B production and sidebar
+production/cancellation all use the engine `Action` path. Input rejections from
+known players are retained and replayed. Selection handles are canonicalized;
+recorded selections are capped at 1024, sessions at 100,000 commands/1,000,000
+steps/128 MiB. Unencodable inputs fail before changing gameplay state.
+
+The initial snapshot contains explicit base placement, initial queue orders and
+any autoplay orders. It also includes all paid jobs in a loaded save. Recording
+starts after scene setup. A final step on close includes input entered since
+the last simulation tick; when both save and replay are requested they describe
+the same finalized simulation. Output files are created without overwriting.
+
+```sh
+cargo run --release -p ra2ne-runtime -- --battle --units=8 \
+  --record-replay=preview.ra2replay
+cargo run --release -p ra2ne-runtime -- --play-replay=preview.ra2replay
+```
+
+`--play-replay=PATH` is a standalone headless verifier; it does not open a window
+or accept other flags. It reports replay step count, actual game tick, rejected
+input count and final state hash. Step count may exceed game tick after a match
+finishes because gameplay freezes while the replay timeline continues.
+This records local preview input; a network lobby and interactive replay viewer
+remain pending. The separate TCP integration test sends typed production and
+cancellation frames between actual loopback peers and compares both simulations
+against the encoded replay at every tick.

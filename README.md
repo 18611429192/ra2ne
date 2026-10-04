@@ -151,3 +151,7 @@ See [rule experiment limits](docs/RULE_EXPERIMENT.md) before importing your rule
 Experimental production bases and sidebar controls are available through
 `--rule-building` and `--rule-queue`; see [RULE_EXPERIMENT.md](docs/RULE_EXPERIMENT.md)
 for the complete runnable fixture command and limits.
+
+Battle previews can now record local commands with `--record-replay=PATH` and
+verify the saved session headlessly with standalone `--play-replay=PATH`.
+The production queue is paged and individual jobs can be cancelled/refunded.

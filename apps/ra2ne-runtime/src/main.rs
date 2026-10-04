@@ -3,6 +3,7 @@
 mod battle;
 mod production_ui;
 mod rule_scenario;
+mod session;
 use battle::Simulation;
 use macroquad::prelude::*;
 use ra2ne_assets::{
@@ -28,6 +29,8 @@ struct Options {
     battle: bool,
     load_game: Option<String>,
     save_game: Option<String>,
+    record_replay: Option<String>,
+    play_replay: Option<String>,
     rule_scenario: rule_scenario::Options,
 }
 impl Options {
@@ -45,6 +48,10 @@ impl Options {
                 options.load_game = Some(v.into());
             } else if let Some(v) = arg.strip_prefix("--save-game=") {
                 options.save_game = Some(v.into());
+            } else if let Some(v) = arg.strip_prefix("--record-replay=") {
+                options.record_replay = Some(v.into());
+            } else if let Some(v) = arg.strip_prefix("--play-replay=") {
+                options.play_replay = Some(v.into());
             } else if arg == "--autoplay" {
                 options.autoplay = true;
             } else if let Some(v) = arg.strip_prefix("--units=") {
@@ -69,6 +76,32 @@ impl Options {
             }
         }
         options.rule_scenario.validate()?;
+        if options.play_replay.is_some() {
+            if std::env::args()
+                .skip(1)
+                .any(|arg| !arg.starts_with("--play-replay="))
+            {
+                return Err("play-replay is a standalone headless verification mode".into());
+            }
+            return Ok(options);
+        }
+        if options
+            .record_replay
+            .as_ref()
+            .is_some_and(|p| std::path::Path::new(p).exists())
+        {
+            return Err("replay output already exists".into());
+        }
+        if options.record_replay.is_some()
+            && !options.battle
+            && options.load_game.is_none()
+            && !options.rule_scenario.enabled()
+        {
+            return Err("replay recording requires battle mode".into());
+        }
+        if options.record_replay.is_some() && options.record_replay == options.save_game {
+            return Err("save and replay outputs must be different".into());
+        }
         if options.rule_scenario.enabled()
             && (options.battle || options.load_game.is_some() || options.map.is_some())
         {
@@ -149,19 +182,22 @@ impl Scene {
                 .collect();
         }
     }
-    fn save(&self, options: &Options) -> Result<(), String> {
+    fn save(&mut self, options: &Options) -> Result<(), String> {
+        if let Simulation::Battle(game) = &mut self.world {
+            game.finish();
+        }
+        if let Some(path) = &options.record_replay {
+            let Simulation::Battle(game) = &self.world else {
+                return Err("recording requires battle mode".into());
+            };
+            write_new(path, &game.replay_bytes()?)?;
+        }
         if let Some(path) = &options.save_game {
             let Simulation::Battle(game) = &self.world else {
                 return Err("game save requires battle mode".into());
             };
             let bytes = game.save()?;
-            use std::io::Write;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)
-                .and_then(|mut f| f.write_all(&bytes))
-                .map_err(|e| e.to_string())?;
+            write_new(path, &bytes)?;
         }
         Ok(())
     }
@@ -295,7 +331,7 @@ impl Scene {
                 .map(|p| (p, 0))
                 .collect();
             name = "Restored synthetic skirmish".into();
-            Simulation::Battle(Box::new(game))
+            Simulation::Battle(Box::new(session::Session::new(game)))
         } else if options.rule_scenario.enabled() {
             let (game, diagnostics) = options.rule_scenario.create(
                 map.clone(),
@@ -307,10 +343,13 @@ impl Scene {
                 eprintln!("rule-import: {diagnostic}");
             }
             messages.extend(diagnostics.into_iter().take(100));
-            Simulation::Battle(Box::new(game))
+            Simulation::Battle(Box::new(session::Session::new(game)))
         } else if options.battle {
             name = "Synthetic skirmish".into();
-            Simulation::Battle(Box::new(battle::synthetic(map.clone(), options.units)?))
+            Simulation::Battle(Box::new(session::Session::new(battle::synthetic(
+                map.clone(),
+                options.units,
+            )?)))
         } else {
             Simulation::Movement(world)
         };
@@ -324,8 +363,19 @@ impl Scene {
                     .filter(|(_, a)| a.owner == owner && game.rules().units[a.kind].speed > 0)
                     .map(|(id, _)| id)
                     .collect::<Vec<_>>();
-                game.move_units(owner, &ids, Cell::new(if owner == 0 { 30 } else { 34 }, 32))?;
+                game.apply(
+                    owner,
+                    ra2ne_game::commands::Action::Move {
+                        units: ids,
+                        goal: Cell::new(if owner == 0 { 30 } else { 34 }, 32),
+                    },
+                )?;
             }
+        }
+        if options.record_replay.is_some()
+            && let Simulation::Battle(game) = &mut world
+        {
+            game.record()?;
         }
         if let Simulation::Battle(game) = &world {
             owners = (0..game.movement().unit_count())
@@ -390,9 +440,43 @@ fn conf() -> Conf {
         ..Default::default()
     }
 }
+fn write_new(path: &str, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(bytes))
+        .map_err(|e| format!("{path}: {e}"))
+}
 fn main() {
-    let result =
-        Options::parse().and_then(|options| Scene::load(&options).map(|scene| (options, scene)));
+    let options = match Options::parse() {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("ra2ne-runtime: {error}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(path) = &options.play_replay {
+        let result = read(path, 128 * 1024 * 1024).and_then(|bytes| {
+            let replay = ra2ne_game::commands::GameReplay::decode(&bytes)?;
+            let playback = replay.play(120)?;
+            println!(
+                "runtime_replay=true; steps={}; ticks={}; rejected={}; state_hash={:016x}",
+                replay.ticks,
+                playback.game.tick_number(),
+                playback.rejected.len(),
+                playback.game.state_hash()
+            );
+            Ok(())
+        });
+        if let Err(error) = result {
+            eprintln!("ra2ne-runtime: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    let result = Scene::load(&options).map(|scene| (options, scene));
     match result {
         Err(error) => {
             eprintln!("ra2ne-runtime: {error}");
@@ -441,7 +525,7 @@ async fn run(options: Options, mut scene: Scene) {
     let mut debug = false;
     let mut accumulator = 0.0;
     let mut frames = 0_u64;
-    let mut production_page = 0;
+    let mut production_ui = production_ui::State::default();
     let mut status = String::from("Select units, then right-click a destination");
     loop {
         if is_key_pressed(KeyCode::Escape) {
@@ -481,7 +565,7 @@ async fn run(options: Options, mut scene: Scene) {
                         .unwrap_or_else(|| scene.world.move_group(&ids, &scene.map, target))
                     {
                         Ok(()) => format!("Command accepted for {} units", ids.len()),
-                        Err(_) => "Destination is outside the map or blocked".into(),
+                        Err(reason) => reason.into(),
                     };
                 }
             }
@@ -531,11 +615,11 @@ async fn run(options: Options, mut scene: Scene) {
                 .collect();
         }
         if is_key_pressed(KeyCode::S) {
-            scene
+            status = scene
                 .world
                 .stop_group(&selected.iter().copied().collect::<Vec<_>>())
-                .ok();
-            status = "Selected units stopped".into();
+                .map(|()| "Selected units stopped".into())
+                .unwrap_or_else(str::to_owned);
         }
         if is_key_pressed(KeyCode::B)
             && let Simulation::Battle(game) = &mut scene.world
@@ -544,7 +628,7 @@ async fn run(options: Options, mut scene: Scene) {
                 let kind = (0..game.rules().units.len())
                     .find(|&kind| game.production_available(0, factory, kind).is_ok());
                 if let Some(kind) = kind {
-                    game.queue_production(0, factory, kind)
+                    game.apply(0, ra2ne_game::commands::Action::Produce { factory, kind })
                         .map(|()| "Production queued".into())
                         .unwrap_or_else(str::to_owned)
                 } else {
@@ -709,9 +793,12 @@ async fn run(options: Options, mut scene: Scene) {
         }
         draw_hud(&scene, &selected, &status, paused, debug, visible.len());
         if let Simulation::Battle(game) = &mut scene.world
-            && let Some(message) = production_ui::draw(game, &selected, &mut production_page)
+            && let Some(action) = production_ui::draw(game, &selected, &mut production_ui)
         {
-            status = message;
+            status = game
+                .apply(0, action)
+                .map(|()| "Production command accepted".into())
+                .unwrap_or_else(str::to_owned);
         }
         frames += 1;
         if options.smoke_frames.is_some_and(|limit| frames >= limit) {
@@ -730,6 +817,7 @@ async fn run(options: Options, mut scene: Scene) {
     }
     if let Err(error) = scene.save(&options) {
         eprintln!("ra2ne-runtime: {error}");
+        std::process::exit(1);
     }
 }
 fn draw_hud(

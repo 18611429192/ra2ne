@@ -28,7 +28,8 @@ pub enum Action {
     },
 }
 impl Action {
-    fn canonicalize(&mut self) -> Result<(), &'static str> {
+    /// Validates selection limits and sorts/deduplicates handles for stable input.
+    pub fn canonicalize(&mut self) -> Result<(), &'static str> {
         let ids = match self {
             Self::Move { units, .. }
             | Self::Stop { units }

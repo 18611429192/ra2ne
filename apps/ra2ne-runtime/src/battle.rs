@@ -3,7 +3,7 @@ use ra2ne_game::{EntityId, Player, Rules, Skirmish, UnitDef, Weapon};
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 pub enum Simulation {
     Movement(World),
-    Battle(Box<Skirmish>),
+    Battle(Box<crate::session::Session>),
 }
 impl Deref for Simulation {
     type Target = World;
@@ -49,7 +49,13 @@ impl Simulation {
             Self::Movement(world) => world.move_group(ids, map, goal),
             Self::Battle(game) => {
                 let handles = handles(game, ids)?;
-                game.move_units(0, &handles, goal)
+                game.apply(
+                    0,
+                    ra2ne_game::commands::Action::Move {
+                        units: handles,
+                        goal,
+                    },
+                )
             }
         }
     }
@@ -58,7 +64,7 @@ impl Simulation {
             Self::Movement(world) => world.stop_group(ids),
             Self::Battle(game) => {
                 let handles = handles(game, ids)?;
-                game.stop_units(0, &handles)
+                game.apply(0, ra2ne_game::commands::Action::Stop { units: handles })
             }
         }
     }
@@ -77,7 +83,12 @@ impl Simulation {
             })
             .find(|(_, p)| *p == goal)?
             .0;
-        Some(handles(game, ids).and_then(|ids| game.attack(0, &ids, target)))
+        Some(handles(game, ids).and_then(|ids| {
+            game.apply(
+                0,
+                ra2ne_game::commands::Action::Attack { units: ids, target },
+            )
+        }))
     }
 }
 fn handles(game: &Skirmish, ids: &[usize]) -> Result<Vec<EntityId>, &'static str> {

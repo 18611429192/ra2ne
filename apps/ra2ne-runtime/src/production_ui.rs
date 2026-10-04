@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use ra2ne_game::{EntityId, Skirmish};
+use ra2ne_game::{EntityId, Skirmish, commands::Action};
 use std::collections::BTreeSet;
 
 pub fn factory(game: &Skirmish, selected: &BTreeSet<usize>) -> Option<EntityId> {
@@ -14,12 +14,25 @@ pub fn factory(game: &Skirmish, selected: &BTreeSet<usize>) -> Option<EntityId> 
         .or_else(|| game.entities().map(|(id, _)| id).find(|&id| valid(id)))
 }
 
-pub fn draw(game: &mut Skirmish, selected: &BTreeSet<usize>, page: &mut usize) -> Option<String> {
+#[derive(Default)]
+pub struct State {
+    product_page: usize,
+    queue_page: usize,
+    factory: Option<EntityId>,
+}
+
+pub fn draw(game: &Skirmish, selected: &BTreeSet<usize>, state: &mut State) -> Option<Action> {
     let x = screen_width() - super::SIDEBAR + 18.0;
     let Some(factory) = factory(game, selected) else {
         draw_text("No owned factory", x, 338.0, 17.0, GRAY);
         return None;
     };
+    if state.factory != Some(factory) {
+        state.factory = Some(factory);
+        state.product_page = 0;
+        state.queue_page = 0;
+    }
+    let page = &mut state.product_page;
     let actor = game.actor(factory).unwrap();
     draw_text(
         format!("Factory: {}", game.rules().units[actor.kind].name),
@@ -36,7 +49,7 @@ pub fn draw(game: &mut Skirmish, selected: &BTreeSet<usize>, page: &mut usize) -
         .filter(|(_, d)| d.speed > 0)
         .map(|(kind, _)| kind)
         .collect();
-    let rows = (((screen_height() - 475.0) / 32.0) as usize).clamp(1, 8);
+    let rows = (((screen_height() - 540.0) / 32.0) as usize).clamp(1, 6);
     let pages = kinds.len().div_ceil(rows).max(1);
     *page = (*page).min(pages - 1);
     let mouse = vec2(mouse_position().0, mouse_position().1);
@@ -68,11 +81,7 @@ pub fn draw(game: &mut Skirmish, selected: &BTreeSet<usize>, page: &mut usize) -
             if let Err(reason) = available {
                 draw_text(reason, 20.0, screen_height() - 42.0, 17.0, ORANGE);
             } else if clicked {
-                action = Some(
-                    game.queue_production(0, factory, kind)
-                        .map(|()| "Production queued".to_owned())
-                        .unwrap_or_else(str::to_owned),
-                );
+                action = Some(Action::Produce { factory, kind });
             }
         }
     }
@@ -92,25 +101,62 @@ pub fn draw(game: &mut Skirmish, selected: &BTreeSet<usize>, page: &mut usize) -
         }
     }
     if let Some(queue) = game.production(factory) {
-        let head = &queue[0];
+        let queue_pages = queue.len().div_ceil(3);
+        state.queue_page = state.queue_page.min(queue_pages - 1);
         draw_text(
-            format!("Queue {} / {} ticks", queue.len(), head.remaining),
+            format!("Queue {} (click to cancel)", queue.len()),
             x,
             y + 49.0,
-            16.0,
+            15.0,
             WHITE,
         );
-        draw_text("Cancel first (refund)", x, y + 75.0, 16.0, ORANGE);
-        if clicked && Rect::new(x, y + 55.0, super::SIDEBAR - 36.0, 26.0).contains(mouse) {
-            action = Some(
-                game.cancel_production(0, factory, 0)
-                    .map(|()| "Production cancelled; credits refunded".to_owned())
-                    .unwrap_or_else(str::to_owned),
+        for (row, (index, job)) in queue
+            .iter()
+            .enumerate()
+            .skip(state.queue_page * 3)
+            .take(3)
+            .enumerate()
+        {
+            let rect = Rect::new(x, y + 62.0 + row as f32 * 28.0, super::SIDEBAR - 36.0, 25.0);
+            draw_rectangle(rect.x, rect.y, rect.w, rect.h, DARKGRAY);
+            if index == 0 {
+                let total = game.rules().units[job.kind].build_ticks.max(1);
+                let progress = total.saturating_sub(job.remaining) as f32 / total as f32;
+                draw_rectangle(rect.x, rect.y, rect.w * progress, rect.h, DARKGREEN);
+            }
+            let name: String = game.rules().units[job.kind].name.chars().take(14).collect();
+            draw_text(
+                format!("{} {}: {}t", index + 1, name, job.remaining),
+                x + 4.0,
+                rect.y + 18.0,
+                14.0,
+                ORANGE,
             );
+            if clicked && rect.contains(mouse) {
+                action = Some(Action::Cancel { factory, index });
+            }
         }
+        let rect = Rect::new(x, y + 154.0, super::SIDEBAR - 36.0, 24.0);
+        draw_text(
+            format!("Queue page {}/{}  < / >", state.queue_page + 1, queue_pages),
+            x,
+            rect.y + 18.0,
+            15.0,
+            WHITE,
+        );
+        if clicked && rect.contains(mouse) {
+            if mouse.x < rect.x + rect.w / 2.0 {
+                state.queue_page = (state.queue_page + queue_pages - 1) % queue_pages;
+            } else {
+                state.queue_page = (state.queue_page + 1) % queue_pages;
+            }
+        }
+    } else {
+        draw_text("Queue empty", x, y + 49.0, 16.0, GRAY);
     }
+
     if game.power_balance(0) < 0 {
-        draw_text("Low power: production paused", x, y + 102.0, 14.0, ORANGE);
+        draw_text("Low power: production paused", x, y + 194.0, 14.0, ORANGE);
     }
     action
 }

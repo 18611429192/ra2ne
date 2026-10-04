@@ -401,3 +401,29 @@ still needs major work. No new graphical/original-resource acceptance is claimed
 - Window/screenshot verification is pending in this environment: Xvfb is absent
   and package installation could not obtain it. Sidebar layout is compiled but
   has not been visually verified in this batch.
+
+
+## Runtime input recording and complete queue controls (2026-10-04)
+
+- Runtime battle sessions route movement, stop, attack, production and cancellation
+  through shared engine actions. Optional v5 replay recording includes rejected
+  input and begins from a post-setup snapshot.
+- Added standalone headless replay verification and final-step handling for
+  input entered after the last tick. Save and replay outputs share that final state.
+- Recording bounds are checked before command application, including selection
+  canonicalization, known-player validation and a conservative 128 MiB budget.
+- Queue pages show individual product names and remaining ticks; any displayed
+  job can be cancelled/refunded. Active-job progress and factory-change page reset
+  are included.
+- New real loopback TCP test covers typed production, refund and ownership/category
+  rejections, matching two peers and encoded replay at every tick. Runtime tests
+  cover input/refund/rejections, final commands, nonzero initial ticks, duplicate
+  selections and byte/selection/player bounds.
+- No wire/save format change; original-content acceptance, multiplayer UI and
+  graphical verification remain pending. Overall 1.0 estimate remains 25%.
+- Validation: 88 workspace tests passed, including finished-match replay timeline
+  and rejected final input; strict Clippy, format and release build passed.
+- Release CLI recorded/replayed tick 45 at hash `510ad2683fe3deae`. Recording
+  75 steps from the tick-45 save reached tick 120 at `b0f9f90499dcd98c`, matching
+  standalone replay and uninterrupted execution. Corrupt replay, output overwrite
+  and incompatible CLI flags were rejected. Window verification remains pending.
