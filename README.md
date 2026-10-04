@@ -28,6 +28,7 @@ Implemented foundations include:
 - bounded TCP lockstep transport and independent peer verification
 - experimental layered INI definitions driving a playable test scenario
 - standard armor and warhead Verses applied to damage and target acquisition
+- experimental primary/secondary weapon selection and pursuit
 
 ## Run
 

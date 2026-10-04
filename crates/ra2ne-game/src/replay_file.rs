@@ -171,7 +171,7 @@ impl GameReplay {
             return Err("replay exceeds codec limit");
         }
         let mut w = Writer::new();
-        w.0.extend_from_slice(b"RA2NEGR2");
+        w.0.extend_from_slice(b"RA2NEGR3");
         w.bytes(&self.initial);
         w.u64(self.ticks);
         w.u64(self.commands.len() as u64);
@@ -184,7 +184,7 @@ impl GameReplay {
         finish(w, MAX_BYTES)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, &'static str> {
-        let mut r = open(bytes, b"RA2NEGR2", MAX_BYTES)?;
+        let mut r = open(bytes, b"RA2NEGR3", MAX_BYTES)?;
         let initial = r.bytes(MAX_BYTES)?.to_vec();
         let ticks = r.u64()?;
         if ticks > 1_000_000 {

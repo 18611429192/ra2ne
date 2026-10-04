@@ -99,9 +99,9 @@ weapon/warhead/projectile/build/AI semantics are not implemented by this loader.
 
 The little-endian engine formats are independent of original game
 save/replay protocols: `RA2NEMV1` (movement), `RA2NEMP1` (navigation map),
-`RA2NEGS2` (full game save), `RA2NEGR2` (full replay) and `RA2NEGF1` (input frame).
-TCP handshake is `RA2NETP2`. Full-game v1 files and v1 peers are rejected after
-adding armor/Verses to combat semantics, hashes and definitions; no migration is
+`RA2NEGS3` (full game save), `RA2NEGR3` (full replay) and `RA2NEGF1` (input frame).
+TCP handshake is `RA2NETP3`. Full-game v1/v2 files and v1/v2 peers are rejected after
+adding armor/Verses and secondary weapons to combat semantics, hashes and definitions; no migration is
 provided. Movement/map/frame formats retain their v1 layouts.
 Saves preserve shared route identities, and reconstruct/revalidate BFS topology
 before accepting a movement state. Hashes detect corruption, not malicious
@@ -126,3 +126,13 @@ integer floor without a minimum-damage adjustment. Retaliation, splash, armor
 extensions and immunity flags remain pending. Values require exactly eleven
 percentage entries with at most three fractional digits and nonnegative u32
 fixed-point magnitude. Unknown/custom armor and missing referenced Verses fail.
+
+
+The experimental dual-weapon adapter uses primary-first armor eligibility,
+with passive-acquisition restrictions evaluated per slot. Range is checked after
+selection, and both slots share an actor cooldown. This is a bounded subset;
+[Phobos developer documentation](https://phobos.readthedocs.io/en/latest/New-or-Enhanced-Logics.html)
+describes secondary fallback and numerous special selection cases not implemented
+here, including transport/deploy/ammo/AA behavior. NoSecondaryWeaponFallback is
+retained with diagnostics. v3 also mixes the movement hash before hashing the
+game Tick, preventing the two identical Tick XORs from cancelling in idle games.

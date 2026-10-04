@@ -274,3 +274,37 @@ Verification on Rust 1.99.0 / Linux:
 Hash changes reflect the expanded rule definitions. No new graphical or
 original-resource acceptance was performed. See RULE_EXPERIMENT.md and
 FORMAT_NOTES.md for supported semantics and sources. 1.0 remains incomplete.
+
+## 2026-10-04: secondary weapons and Tick-sensitive game hashes
+
+Both weapon slots now compile from layered INI rules. Primary-first armor
+eligibility chooses the weapon for explicit commands, automatic acquisition and
+pursuit; passive flags are evaluated separately for automatic selection. Chosen
+range, damage and reload are used in combat. Secondary-only definitions work.
+Both slots share an actor cooldown. Longer secondary range alone does not bypass
+an eligible primary. Elite/ammo/AA/deploy/transport/wall selection remains pending.
+
+Regression found that movement hash's final Tick XOR was immediately cancelled
+by the game's identical Tick XOR in stationary scenes. Game hashing now mixes
+the movement hash first. A dedicated idle-world test verifies different Tick
+hashes and save restore. Both weapon definitions and multipliers are hashed and
+saved. Full-game saves/replays and TCP handshakes are v3; v1/v2 are rejected.
+
+Verified on Rust 1.99.0 / Linux:
+- 77 workspace tests, strict Clippy, formatting and Release builds pass.
+- New tests cover primary priority, secondary-only actors, passive fallback,
+  no range-only fallback, secondary-range pursuit, damage/cooldown, invalid
+  secondary rules, overlays, save restore and full-game replay.
+- Two 512-unit overlay runs requested 900 calls, finished at Tick 539 and froze
+  with hash `37d77b58c0cac090`. Save at Tick 100 plus 800 calls matches exactly;
+  this is 539 active Ticks, not 900 active combat Ticks.
+- Network fixture deliberately gives its primary zero Verses; actual shot
+  events must have secondary damage and match across peers. Two independent
+  2,000-unit peers / 900 Ticks and full replay agree, 148,098 bytes,
+  hash `7611521db24237ec`.
+- Sustained 10,000-unit primary combat: 900 Ticks / 31 matching checkpoints,
+  hash `1bb42b61f7f74d43`, 2.679 ms/Tick with concurrent regression processes.
+
+Added a redistributable secondary-overlay fixture and documented selection
+boundaries. No new graphical/original-resource acceptance is claimed; 1.0
+remains incomplete.

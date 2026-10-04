@@ -79,50 +79,51 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
         };
         let cost = u32::try_from(unit.cost)
             .map_err(|_| format!("[{}]: negative Cost cannot be imported", unit.id))?;
-        let weapon = unit
-            .primary
-            .as_ref()
-            .map(|id| -> Result<Weapon, String> {
-                let source = catalog
-                    .weapons
-                    .get(&id.to_ascii_lowercase())
-                    .ok_or_else(|| format!("[{id}]: missing primary weapon"))?;
-                let damage = u32::try_from(source.damage)
-                    .map_err(|_| format!("[{id}]: healing weapons are unsupported"))?;
-                // Range is in thousandths of a cell; engine range is whole cells.
-                // Reject fractional values instead of silently changing combat reach.
-                if source.range.0 <= 0 || source.range.0 % 1000 != 0 {
-                    return Err(format!(
-                        "[{id}]: Range must be positive whole cells for this engine"
-                    ));
-                }
-                let range = u32::try_from(source.range.0 / 1000)
-                    .map_err(|_| format!("[{id}]: Range overflow"))?;
-                let reload_ticks = u64::from(source.rof) * u64::from(policy.rof_numerator);
-                let reload_ticks = reload_ticks
-                    .div_ceil(u64::from(policy.rof_denominator))
-                    .max(1);
-                let reload_ticks = u32::try_from(reload_ticks)
-                    .map_err(|_| format!("[{id}]: calibrated ROF overflow"))?;
-                if source.projectile.is_some() {
-                    diagnostics.push(format!(
-                        "[{id}]: Projectile behavior is not applied; immediate direct damage only"
-                    ));
-                }
-                let verses = source
-                    .warhead
-                    .as_ref()
-                    .map_or(Verses::default(), |id| warheads[&id.to_ascii_lowercase()]);
-                Ok(Weapon {
-                    verses,
-                    damage,
-                    range,
-                    reload_ticks,
-                })
+        let mut compile_weapon = |id: &String| -> Result<Weapon, String> {
+            let source = catalog
+                .weapons
+                .get(&id.to_ascii_lowercase())
+                .ok_or_else(|| format!("[{id}]: missing weapon"))?;
+            let damage = u32::try_from(source.damage)
+                .map_err(|_| format!("[{id}]: healing weapons are unsupported"))?;
+            // Range is in thousandths of a cell; engine range is whole cells.
+            // Reject fractional values instead of silently changing combat reach.
+            if source.range.0 <= 0 || source.range.0 % 1000 != 0 {
+                return Err(format!(
+                    "[{id}]: Range must be positive whole cells for this engine"
+                ));
+            }
+            let range = u32::try_from(source.range.0 / 1000)
+                .map_err(|_| format!("[{id}]: Range overflow"))?;
+            let reload_ticks = u64::from(source.rof) * u64::from(policy.rof_numerator);
+            let reload_ticks = reload_ticks
+                .div_ceil(u64::from(policy.rof_denominator))
+                .max(1);
+            let reload_ticks = u32::try_from(reload_ticks)
+                .map_err(|_| format!("[{id}]: calibrated ROF overflow"))?;
+            if source.projectile.is_some() {
+                diagnostics.push(format!(
+                    "[{id}]: Projectile behavior is not applied; immediate direct damage only"
+                ));
+            }
+            let verses = source
+                .warhead
+                .as_ref()
+                .map_or(Verses::default(), |id| warheads[&id.to_ascii_lowercase()]);
+            Ok(Weapon {
+                verses,
+                damage,
+                range,
+                reload_ticks,
             })
+        };
+        let weapon = unit.primary.as_ref().map(&mut compile_weapon).transpose()?;
+        let secondary = unit
+            .secondary
+            .as_ref()
+            .map(&mut compile_weapon)
             .transpose()?;
         for (key, present) in [
-            ("Secondary", unit.secondary.is_some()),
             ("Prerequisite", !unit.prerequisites.is_empty()),
             ("Owner", !unit.owners.is_empty()),
             ("Sight", unit.sight.0 != 0),
@@ -181,6 +182,7 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
             speed,
             cost,
             weapon,
+            secondary,
             build_ticks: policy.build_ticks,
             power,
             factory: false,
@@ -249,6 +251,31 @@ mod tests {
                 .damage(20, Armor::Heavy),
             30
         );
+    }
+    #[test]
+    fn secondary_definitions_and_their_overlays_are_compiled() {
+        let mut rules = fixture();
+        rules
+            .add_layer(
+                "secondary.ini",
+                "[TANK]\nSecondary=BACKUP\n[BACKUP]\nDamage=7\nROF=12\nRange=3\nWarhead=AP\n",
+            )
+            .unwrap();
+        rules.add_layer("map.ini", "[BACKUP]\nDamage=11\n").unwrap();
+        let imported = import(&rules, &policy()).unwrap();
+        let secondary = imported.rules.units[0].secondary.as_ref().unwrap();
+        assert_eq!(
+            (secondary.damage, secondary.range, secondary.reload_ticks),
+            (11, 3, 8)
+        );
+        assert!(
+            !imported
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("Secondary is preserved"))
+        );
+        rules.add_layer("bad.ini", "[BACKUP]\nRange=3.5\n").unwrap();
+        assert!(import(&rules, &policy()).is_err());
     }
     #[test]
     fn unsupported_values_fail_without_silent_rounding_or_clamping() {

@@ -327,6 +327,7 @@ fn game_check() {
     assert!((2..=100_000).contains(&count) && ticks > 0);
     let rules = Arc::new(Rules {
         units: vec![UnitDef {
+            secondary: None,
             armor: ra2ne_game::Armor::None,
             name: "test-tank".into(),
             health: 1_000_000,
@@ -414,14 +415,20 @@ fn network_check() {
     assert!((2..=20_000).contains(&count) && (1..=1_000_000).contains(&ticks));
     let rules = Arc::new(Rules {
         units: vec![UnitDef {
+            secondary: Some(Weapon {
+                verses: ra2ne_game::Verses::default(),
+                damage: 10,
+                range: 4,
+                reload_ticks: 15,
+            }),
             armor: ra2ne_game::Armor::None,
             name: "network-test-tank".into(),
             health: 1_000_000,
             speed: 1,
             cost: 100,
             weapon: Some(Weapon {
-                verses: ra2ne_game::Verses::default(),
-                damage: 10,
+                verses: ra2ne_game::Verses([0; 11]),
+                damage: 100,
                 range: 4,
                 reload_ticks: 15,
             }),
@@ -535,6 +542,15 @@ fn network_check() {
         }
         a.tick();
         b.tick();
+        assert_eq!(a.events(), b.events());
+        for event in a.events() {
+            if let ra2ne_game::Event::Shot { damage, .. } = event {
+                assert_eq!(
+                    *damage, 10,
+                    "network fixture must fire its secondary weapon"
+                );
+            }
+        }
         assert_eq!(
             a.state_hash(),
             b.state_hash(),
@@ -550,7 +566,7 @@ fn network_check() {
     let restored = GameReplay::decode(&bytes).unwrap().play(30).unwrap();
     assert_eq!(restored.game.state_hash(), a.state_hash());
     println!(
-        "tcp_game_replay_verified=true; peers=2; units={count}; ticks={ticks}; replay_bytes={}; elapsed_ms={:.3}; state_hash={:016x}",
+        "tcp_game_replay_verified=true; secondary_fixture=true; peers=2; units={count}; ticks={ticks}; replay_bytes={}; elapsed_ms={:.3}; state_hash={:016x}",
         bytes.len(),
         start.elapsed().as_secs_f64() * 1000.0,
         a.state_hash()

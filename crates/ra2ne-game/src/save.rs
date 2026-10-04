@@ -15,7 +15,7 @@ fn read_id(r: &mut Reader<'_>) -> Result<EntityId, &'static str> {
 impl Skirmish {
     pub fn save(&self) -> Result<Vec<u8>, &'static str> {
         let mut w = Writer::new();
-        w.0.extend_from_slice(b"RA2NEGS2");
+        w.0.extend_from_slice(b"RA2NEGS3");
         w.u64(self.tick);
         w.boolean(self.started_with_opponents);
         w.boolean(self.finished);
@@ -35,14 +35,16 @@ impl Skirmish {
             w.i32(def.power);
             w.boolean(def.factory);
             w.boolean(def.harvester);
-            w.boolean(def.weapon.is_some());
-            if let Some(weapon) = &def.weapon {
-                for value in weapon.verses.0 {
-                    w.u32(value);
+            for weapon in [&def.weapon, &def.secondary] {
+                w.boolean(weapon.is_some());
+                if let Some(weapon) = weapon {
+                    for value in weapon.verses.0 {
+                        w.u32(value);
+                    }
+                    w.u32(weapon.damage);
+                    w.u32(weapon.range);
+                    w.u32(weapon.reload_ticks);
                 }
-                w.u32(weapon.damage);
-                w.u32(weapon.range);
-                w.u32(weapon.reload_ticks);
             }
         }
         w.bytes(&self.map.checkpoint()?);
@@ -101,7 +103,7 @@ impl Skirmish {
     }
     pub fn load(bytes: &[u8]) -> Result<Self, &'static str> {
         let mut r = Reader::new(bytes)?;
-        if r.take(8)? != b"RA2NEGS2" {
+        if r.take(8)? != b"RA2NEGS3" {
             return Err("unsupported game save");
         }
         let tick = r.u64()?;
@@ -123,20 +125,24 @@ impl Skirmish {
             let power = r.i32()?;
             let factory = r.boolean()?;
             let harvester = r.boolean()?;
-            let weapon = if r.boolean()? {
-                let mut values = [0; 11];
-                for value in &mut values {
-                    *value = r.u32()?;
-                }
-                Some(Weapon {
-                    verses: Verses(values),
-                    damage: r.u32()?,
-                    range: r.u32()?,
-                    reload_ticks: r.u32()?,
+            let mut read_weapon = || -> Result<Option<Weapon>, &'static str> {
+                Ok(if r.boolean()? {
+                    let mut values = [0; 11];
+                    for value in &mut values {
+                        *value = r.u32()?;
+                    }
+                    Some(Weapon {
+                        verses: Verses(values),
+                        damage: r.u32()?,
+                        range: r.u32()?,
+                        reload_ticks: r.u32()?,
+                    })
+                } else {
+                    None
                 })
-            } else {
-                None
             };
+            let weapon = read_weapon()?;
+            let secondary = read_weapon()?;
             units.push(UnitDef {
                 armor,
                 name,
@@ -148,6 +154,7 @@ impl Skirmish {
                 factory,
                 harvester,
                 weapon,
+                secondary,
             });
         }
         let rules = Arc::new(Rules {
@@ -209,7 +216,15 @@ impl Skirmish {
                 {
                     return Err("invalid save actor");
                 }
-                if cooldown > def.weapon.as_ref().map_or(0, |w| w.reload_ticks) {
+                if cooldown
+                    > def
+                        .weapon
+                        .iter()
+                        .chain(&def.secondary)
+                        .map(|w| w.reload_ticks)
+                        .max()
+                        .unwrap_or(0)
+                {
                     return Err("invalid save cooldown");
                 }
                 Some(Actor {

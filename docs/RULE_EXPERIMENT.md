@@ -22,9 +22,9 @@ order remains stable, and type IDs match without ASCII case sensitivity.
 | --- | --- |
 | Strength, Cost | Imported exactly; positive health, nonnegative cost required |
 | Speed | Each mobile speed requires explicit `--rule-speed=original:engine`; engine accepts 0–16 |
-| Primary Damage | Nonnegative direct damage; healing weapons rejected |
-| Primary Range | Positive whole cells, at most 1024; fractional ranges rejected |
-| Primary ROF | `ceil(ROF * numerator / denominator)`, minimum one Tick, using `--rule-rof=N:D` |
+| Primary/Secondary Damage | Nonnegative direct damage; healing weapons rejected |
+| Primary/Secondary Range | Positive whole cells, at most 1024; fractional ranges rejected |
+| Primary/Secondary ROF | `ceil(ROF * numerator / denominator)`, minimum one Tick, using `--rule-rof=N:D` |
 | Power | Signed integer applied to the engine power balance |
 | Harvester | Checked boolean; synthetic harvesting behavior with warning |
 | BuildingTypes | Stationary definitions; no original construction/footprint behavior |
@@ -32,7 +32,7 @@ order remains stable, and type IDs match without ASCII case sensitivity.
 | Factory | Preserved with diagnostic; production disabled to avoid ignoring categories |
 | Armor | Eleven standard armor slots; unknown/custom armor rejected |
 | Warhead Verses | Exactly eleven percentages; exact thousandths of a percent; target armor scales direct damage |
-| Secondary, Prerequisite, Owner, Sight | Preserved with explicit omitted-behavior diagnostics |
+| Prerequisite, Owner, Sight | Preserved with explicit omitted-behavior diagnostics |
 | Projectile and other warhead properties | Immediate direct hits; other properties retained with diagnostics |
 | Other properties | Retained by asset frontend, source/line diagnostics |
 
@@ -44,7 +44,7 @@ invalid values, invent missing weapon definitions, or silently round ranges.
 The game library exposes `rule_import::import` independently of the runtime.
 The returned diagnostics must be shown to users before using experimental rules.
 Runtime prints all diagnostics to stderr; the graphical scene keeps the first
-100. Projectiles, secondary selection, prerequisites, faction
+100. Projectiles, full original weapon-selection semantics, prerequisites, faction
 ownership, terrain movement classes and original production remain necessary
 for ordinary original-game and MOD compatibility. Importing data is not proof
 that those behaviors are compatible.
@@ -62,7 +62,25 @@ disable automatic acquisition. Retaliation is not implemented. Original damage
 rounding, minimum damage, splash/falloff and immunity flags remain unverified or
 unsupported; this is not complete original warhead behavior.
 
-Full-game saves/replays and TCP handshakes are now v2. v1 full-game artifacts
+Full-game saves/replays and TCP handshakes are now v3. v1/v2 full-game artifacts
 and peers are rejected; there is no migration adapter. Movement/map checkpoints
 and input-frame encoding remain v1. Imported armor and every multiplier are
 included in the game state hash and engine saves.
+
+
+Secondary weapon experiment:
+
+```sh
+cargo run --release -p ra2ne-runtime -- --rules-experiment=fixtures/rules-experiment.ini --rules-overlay=fixtures/secondary-experiment.ini --rule-unit=TESTTANK --rule-speed=5:1 --rule-rof=1:1 --rule-build-ticks=90 --units=512 --autoplay --headless-ticks=900
+```
+
+The overlay makes the primary ineffective against heavy armor and supplies a
+secondary weapon. Both slots share the same actor cooldown; the chosen weapon
+sets its duration. Explicit attacks select the first nonzero-eligible weapon,
+primary before secondary. Automatic acquisition selects the first weapon allowed
+by passive-acquisition flags, using the same priority. Range is checked after
+selection: a longer secondary range alone does not replace an eligible primary.
+Pursuit stops at the selected weapon's range. Secondary-only types work.
+Elite weapons, ammo, AA/AG filters, wall/deploy/transport special selection and
+NoSecondaryWeaponFallback extensions remain unsupported. These are explicit
+experimental rules, not complete original selection behavior.
