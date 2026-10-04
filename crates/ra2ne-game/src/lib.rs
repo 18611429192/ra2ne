@@ -1,5 +1,11 @@
 //! Deterministic game systems foundation. Timings and rule definitions are
 //! explicit engine values; the complete original RA2 rules adapter is pending.
+pub mod commands;
+mod economy;
+pub mod network;
+mod replay_file;
+mod save;
+use economy::HarvestOrder;
 use ra2ne_core::{Unit, Vec2, World, navigation::NavigationMap};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -36,12 +42,17 @@ pub struct Rules {
 }
 impl Rules {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.units.is_empty() || self.max_entities == 0 || self.max_entities > 100_000 {
+        if self.units.is_empty()
+            || self.units.len() > 100_000
+            || self.max_entities == 0
+            || self.max_entities > 100_000
+        {
             return Err("invalid game rule limits");
         }
         let mut names = BTreeSet::new();
         for unit in &self.units {
             if unit.name.is_empty()
+                || unit.name.len() > 4096
                 || !names.insert(unit.name.to_ascii_lowercase())
                 || unit.health == 0
                 || unit.speed < 0
@@ -91,6 +102,7 @@ pub enum Event {
         factory: EntityId,
         entity: EntityId,
     },
+    Draw,
     Victory {
         player: u32,
     },
@@ -111,9 +123,12 @@ pub struct Skirmish {
     players: BTreeMap<u32, Player>,
     events: Vec<Event>,
     production: BTreeMap<EntityId, VecDeque<Production>>,
+    harvesting: BTreeMap<EntityId, HarvestOrder>,
+    resources: BTreeMap<(i32, i32), u32>,
     tick: u64,
     started_with_opponents: bool,
     winner: Option<u32>,
+    finished: bool,
 }
 impl Skirmish {
     pub fn new(
@@ -122,7 +137,7 @@ impl Skirmish {
         players: BTreeMap<u32, Player>,
     ) -> Result<Self, &'static str> {
         rules.validate()?;
-        if players.is_empty() {
+        if players.is_empty() || players.len() > 64 {
             return Err("empty player roster");
         }
         let mut movement = World::from_units(Vec::new());
@@ -136,9 +151,12 @@ impl Skirmish {
             players,
             events: Vec::new(),
             production: BTreeMap::new(),
+            harvesting: BTreeMap::new(),
+            resources: BTreeMap::new(),
             tick: 0,
             started_with_opponents: false,
             winner: None,
+            finished: false,
         })
     }
     pub fn movement(&self) -> &World {
@@ -158,6 +176,9 @@ impl Skirmish {
     }
     pub fn tick_number(&self) -> u64 {
         self.tick
+    }
+    pub fn finished(&self) -> bool {
+        self.finished
     }
     pub fn winner(&self) -> Option<u32> {
         self.winner
@@ -204,6 +225,9 @@ impl Skirmish {
         let mut slots = Vec::with_capacity(entries.len());
         let mut owners = BTreeSet::new();
         for &(owner, kind, position) in entries {
+            if self.finished {
+                return Err("game finished");
+            }
             if !self.players.contains_key(&owner) || self.players[&owner].defeated {
                 return Err("unknown or defeated player");
             }
@@ -245,6 +269,9 @@ impl Skirmish {
         kind: usize,
         position: Vec2,
     ) -> Result<EntityId, &'static str> {
+        if self.finished {
+            return Err("game finished");
+        }
         if !self.players.contains_key(&owner) || self.players[&owner].defeated {
             return Err("unknown or defeated player");
         }
@@ -297,6 +324,9 @@ impl Skirmish {
         Ok(id)
     }
     fn selected(&self, player: u32, ids: &[EntityId]) -> Result<Vec<usize>, &'static str> {
+        if self.finished {
+            return Err("game finished");
+        }
         if !self.players.contains_key(&player) || self.players[&player].defeated {
             return Err("unknown or defeated player");
         }
@@ -318,6 +348,9 @@ impl Skirmish {
     ) -> Result<(), &'static str> {
         let indexes = self.selected(player, ids)?;
         self.movement.move_group(&indexes, &self.map, goal)?;
+        for &index in &indexes {
+            self.harvesting.remove(&self.entity_at(index).unwrap());
+        }
         for index in indexes {
             self.slots[index].actor.as_mut().unwrap().target = None;
         }
@@ -326,6 +359,9 @@ impl Skirmish {
     pub fn stop_units(&mut self, player: u32, ids: &[EntityId]) -> Result<(), &'static str> {
         let indexes = self.selected(player, ids)?;
         self.movement.stop_group(&indexes)?;
+        for &index in &indexes {
+            self.harvesting.remove(&self.entity_at(index).unwrap());
+        }
         for index in indexes {
             self.slots[index].actor.as_mut().unwrap().target = None;
         }
@@ -350,6 +386,9 @@ impl Skirmish {
             return Err("selected unit has no weapon");
         }
         self.movement.stop_group(&indexes)?;
+        for &index in &indexes {
+            self.harvesting.remove(&self.entity_at(index).unwrap());
+        }
         for index in indexes {
             self.slots[index].actor.as_mut().unwrap().target = Some(target);
         }
@@ -366,7 +405,7 @@ impl Skirmish {
         kind: usize,
     ) -> Result<(), &'static str> {
         self.selected(player, &[factory])?;
-        if self.winner.is_some() {
+        if self.finished {
             return Err("game finished");
         }
         let actor = self.actor(factory).unwrap();
@@ -404,7 +443,8 @@ impl Skirmish {
             .get_mut(&factory)
             .ok_or("empty production queue")?;
         let job = queue.remove(index).ok_or("unknown production job")?;
-        self.players.get_mut(&player).unwrap().credits += u64::from(job.paid);
+        let account = self.players.get_mut(&player).unwrap();
+        account.credits = account.credits.saturating_add(u64::from(job.paid));
         if queue.is_empty() {
             self.production.remove(&factory);
         }
@@ -465,9 +505,10 @@ impl Skirmish {
     /// mutually lethal combat is independent of actor iteration order.
     pub fn tick(&mut self) {
         self.events.clear();
-        if self.winner.is_some() {
+        if self.finished {
             return;
         }
+        self.advance_pursuit();
         self.movement.tick();
         let mut shots = Vec::new();
         for (id, actor) in self.entities() {
@@ -530,9 +571,27 @@ impl Skirmish {
                 dead.push(target);
             }
         }
-        for id in dead {
-            self.destroy(id);
+        if !dead.is_empty() {
+            let replacements: Vec<_> = dead
+                .iter()
+                .map(|id| {
+                    let position = self.movement.unit(id.index as usize).unwrap().position;
+                    (
+                        id.index as usize,
+                        Unit {
+                            position,
+                            goal: position,
+                            speed: 0,
+                        },
+                    )
+                })
+                .collect();
+            self.movement.replace_units(&replacements).unwrap();
+            for id in dead {
+                self.destroy(id);
+            }
         }
+        self.advance_harvesting();
         self.advance_production();
         self.tick += 1;
         if self.started_with_opponents {
@@ -545,8 +604,49 @@ impl Skirmish {
             if alive.len() == 1 {
                 let player = *alive.first().unwrap();
                 self.winner = Some(player);
+                self.finished = true;
                 self.events.push(Event::Victory { player });
+            } else if alive.is_empty() {
+                self.finished = true;
+                self.events.push(Event::Draw);
             }
+        }
+    }
+    fn advance_pursuit(&mut self) {
+        let mut groups = BTreeMap::<EntityId, Vec<usize>>::new();
+        let mut stops = Vec::new();
+        let mut clear = Vec::new();
+        for (id, actor) in self.entities() {
+            let Some(target) = actor.target else {
+                continue;
+            };
+            let Some(victim) = self.actor(target) else {
+                clear.push(id.index as usize);
+                continue;
+            };
+            let definition = &self.rules.units[actor.kind];
+            let Some(weapon) = &definition.weapon else {
+                continue;
+            };
+            let unit = self.movement.unit(id.index as usize).unwrap();
+            if self.in_range(actor.owner, unit.position, target, weapon.range) {
+                if unit.goal != unit.position {
+                    stops.push(id.index as usize);
+                }
+            } else if definition.speed > 0 && victim.owner != actor.owner {
+                let goal = self.movement.unit(target.index as usize).unwrap().position;
+                if unit.goal != goal {
+                    groups.entry(target).or_default().push(id.index as usize);
+                }
+            }
+        }
+        self.movement.stop_group(&stops).unwrap();
+        for index in clear {
+            self.slots[index].actor.as_mut().unwrap().target = None;
+        }
+        for (target, indexes) in groups {
+            let goal = self.movement.unit(target.index as usize).unwrap().position;
+            let _ = self.movement.move_group(&indexes, &self.map, goal);
         }
     }
     fn in_range(&self, owner: u32, position: Vec2, target: EntityId, range: u32) -> bool {
@@ -559,19 +659,8 @@ impl Skirmish {
         })
     }
     fn destroy(&mut self, id: EntityId) {
-        let unit = self.movement.unit(id.index as usize).unwrap();
-        let position = unit.position;
-        self.movement
-            .replace_unit(
-                id.index as usize,
-                Unit {
-                    position,
-                    goal: position,
-                    speed: 0,
-                },
-            )
-            .unwrap();
         self.production.remove(&id);
+        self.harvesting.remove(&id);
         let slot = &mut self.slots[id.index as usize];
         slot.actor = None;
         if slot.generation < u32::MAX {
@@ -589,6 +678,23 @@ impl Skirmish {
             hash = hash.wrapping_mul(0x100_0000_01b3);
         };
         put(self.tick);
+        put(u64::from(self.finished));
+        put(self.resources.len() as u64);
+        for (&(x, y), &amount) in &self.resources {
+            put(x as u32 as u64);
+            put(y as u32 as u64);
+            put(u64::from(amount));
+        }
+        put(self.harvesting.len() as u64);
+        for (id, order) in &self.harvesting {
+            put(u64::from(id.index));
+            put(u64::from(id.generation));
+            put(order.resource.x as u32 as u64);
+            put(order.resource.y as u32 as u64);
+            put(u64::from(order.refinery.index));
+            put(u64::from(order.refinery.generation));
+            put(u64::from(order.returning));
+        }
         put(self.map.state_hash());
         put(self.rules.max_entities as u64);
         for (factory, queue) in &self.production {
@@ -603,6 +709,10 @@ impl Skirmish {
         }
         put(u64::from(self.started_with_opponents));
         put(self.winner.map_or(u64::MAX, u64::from));
+        put(self.players.len() as u64);
+        put(self.slots.len() as u64);
+        put(self.rules.units.len() as u64);
+        put(self.production.len() as u64);
         for (&owner, p) in &self.players {
             put(u64::from(owner));
             put(p.credits);
@@ -654,7 +764,7 @@ fn distance_squared(a: Vec2, b: Vec2) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn game() -> Skirmish {
+    pub(super) fn game() -> Skirmish {
         let rules = Arc::new(Rules {
             units: vec![UnitDef {
                 name: "tank".into(),
@@ -732,6 +842,41 @@ mod tests {
             game.movement.unit(a.index as usize).unwrap().position,
             Vec2::new(1, 1)
         );
+    }
+    #[test]
+    fn attack_pursues_until_range_then_stops_and_draw_freezes_tick() {
+        let mut game = game();
+        let a = game.spawn(0, 0, Vec2::new(1, 1)).unwrap();
+        let b = game.spawn(1, 0, Vec2::new(10, 1)).unwrap();
+        game.attack(0, &[a], b).unwrap();
+        for _ in 0..30 {
+            game.tick();
+        }
+        assert!(game.finished());
+        assert!(game.winner().is_none());
+        let tick = game.tick_number();
+        game.tick();
+        assert_eq!(game.tick_number(), tick);
+        assert!(game.spawn(0, 0, Vec2::new(1, 1)).is_err());
+    }
+    #[test]
+    fn harvesting_conserves_resource_and_credits_and_rejects_foreign_depot() {
+        let mut game = game();
+        Arc::make_mut(&mut game.rules).units[0].factory = true;
+        Arc::make_mut(&mut game.rules).units[0].harvester = true;
+        Arc::make_mut(&mut game.rules).units[0].weapon = None;
+        let depot = game.spawn(0, 0, Vec2::new(1, 1)).unwrap();
+        let miner = game.spawn(0, 0, Vec2::new(2, 1)).unwrap();
+        game.set_resource(Vec2::new(3, 1), 35).unwrap();
+        game.harvest(0, &[miner], Vec2::new(3, 1), depot).unwrap();
+        for _ in 0..100 {
+            game.tick();
+        }
+        assert_eq!(game.resource(Vec2::new(3, 1)), 0);
+        assert_eq!(game.actor(miner).unwrap().cargo, 0);
+        assert_eq!(game.players()[&0].credits, 1000 + 35 * 25);
+        assert!(game.harvesting.is_empty());
+        assert!(game.harvest(1, &[miner], Vec2::new(3, 1), depot).is_err());
     }
     #[test]
     fn production_reserves_refunds_and_waits_for_power_and_exit() {

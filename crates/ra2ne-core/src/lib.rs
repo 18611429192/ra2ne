@@ -8,6 +8,7 @@ pub mod lockstep;
 pub mod navigation;
 pub mod replay;
 pub mod replay_file;
+pub mod snapshot;
 use navigation::{NavigationMap, SharedRoute};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -226,11 +227,19 @@ impl World {
     /// Replace an existing slot and clear its old movement order. Entity
     /// generation/ownership checks belong to the game layer using this slot.
     pub fn replace_unit(&mut self, id: usize, unit: Unit) -> Result<(), &'static str> {
-        if id >= self.units.len() || unit.speed < 0 {
+        self.replace_units(&[(id, unit)])
+    }
+    pub fn replace_units(&mut self, replacements: &[(usize, Unit)]) -> Result<(), &'static str> {
+        if replacements
+            .iter()
+            .any(|(id, unit)| *id >= self.units.len() || unit.speed < 0)
+        {
             return Err("invalid replacement unit");
         }
-        self.units[id] = unit;
-        self.orders[id] = None;
+        for &(id, unit) in replacements {
+            self.units[id] = unit;
+            self.orders[id] = None;
+        }
         self.spatial.rebuild(&self.units);
         Ok(())
     }

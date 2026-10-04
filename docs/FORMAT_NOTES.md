@@ -93,3 +93,21 @@ parsed as exact thousandths, never host floating point. Unknown properties and
 unconsumed sections remain in the source with diagnostics. Defaults describe
 this incomplete discovery schema, not undocumented original-engine defaults;
 weapon/warhead/projectile/build/AI semantics are not implemented by this loader.
+
+
+## Engine state and game transport formats
+
+The new version-1 little-endian engine formats are independent of original game
+save/replay protocols: `RA2NEMV1` (movement), `RA2NEMP1` (navigation map),
+`RA2NEGS1` (full game save), `RA2NEGR1` (full replay) and `RA2NEGF1` (input frame).
+Saves preserve shared route identities, and reconstruct/revalidate BFS topology
+before accepting a movement state. Hashes detect corruption, not malicious
+cryptographic forgery. Event buffers and spatial caches are transient.
+
+Decoders limit whole state/replay files to 128 MiB, actors to 100,000, map/total
+route cells to 4,194,304, players to 64, replay commands to 100,000 and replay
+steps to 1,000,000. A frame is at most 64 KiB with 64 commands; each selection is
+at most 1,024 handles and an accepted frame contains at most 4,096 selected handles.
+Lockstep accepts at most 120 future Ticks. TCP adds a four-byte message length,
+a versioned session handshake, at most 128 queued messages and bounded I/O per
+poll. Session membership does not provide encrypted transport or matchmaking.

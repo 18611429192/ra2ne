@@ -15,6 +15,14 @@ fn argument(name: &str, default: usize) -> usize {
 }
 
 fn main() {
+    if env::args().any(|arg| arg == "--network-check") {
+        network_check();
+        return;
+    }
+    if env::args().any(|arg| arg == "--game-check") {
+        game_check();
+        return;
+    }
     if env::args().any(|arg| arg == "--rules-check") {
         rules_check();
         return;
@@ -309,4 +317,238 @@ fn rules_check() {
     assert!(catalog.diagnostics.is_empty());
     assert_eq!(catalog.type_by_id("unit9999").unwrap().strength, 200);
     println!("rules_verified=true; types=10000; weapons=1; load_ms={load_ms:.3}");
+}
+
+fn game_check() {
+    use ra2ne_game::{Player, Rules, Skirmish, UnitDef, Weapon};
+    use std::{collections::BTreeMap, sync::Arc};
+    let count = argument("units", 10_000);
+    let ticks = argument("ticks", 900);
+    assert!((2..=100_000).contains(&count) && ticks > 0);
+    let rules = Arc::new(Rules {
+        units: vec![UnitDef {
+            name: "test-tank".into(),
+            health: 1_000_000,
+            speed: 1,
+            cost: 100,
+            weapon: Some(Weapon {
+                damage: 10,
+                range: 4,
+                reload_ticks: 15,
+            }),
+            build_ticks: 30,
+            power: 0,
+            factory: false,
+            harvester: false,
+        }],
+        max_entities: count,
+    });
+    let entries: Vec<_> = (0..count)
+        .map(|i| {
+            (
+                (i % 2) as u32,
+                0,
+                Vec2::new((i % 256) as i32, (i / 256) as i32),
+            )
+        })
+        .collect();
+    let mut hashes = Vec::new();
+    let start = Instant::now();
+    let mut simulated = 0;
+    for _ in 0..2 {
+        let mut game = Skirmish::new(
+            rules.clone(),
+            NavigationMap::new(256, count.div_ceil(256)),
+            BTreeMap::from([
+                (
+                    0,
+                    Player {
+                        credits: 1000,
+                        defeated: false,
+                    },
+                ),
+                (
+                    1,
+                    Player {
+                        credits: 1000,
+                        defeated: false,
+                    },
+                ),
+            ]),
+        )
+        .unwrap();
+        game.populate(&entries).unwrap();
+        for tick in 0..ticks {
+            game.tick();
+            simulated += 1;
+            if tick % 30 == 0 || tick + 1 == ticks {
+                hashes.push(game.state_hash());
+            }
+        }
+    }
+    let midpoint = hashes.len() / 2;
+    assert_eq!(&hashes[..midpoint], &hashes[midpoint..]);
+    println!(
+        "game_determinism_verified=true; units={count}; ticks={ticks}; checkpoints={midpoint}; ms_per_tick={:.3}; state_hash={:016x}",
+        start.elapsed().as_secs_f64() * 1000.0 / simulated as f64,
+        hashes.last().unwrap()
+    );
+}
+
+fn network_check() {
+    use ra2ne_game::{
+        Player, Rules, Skirmish, UnitDef, Weapon,
+        commands::{Action, Command, Frame, GameLockstep, GameReplay},
+        network::{Peer, Session},
+    };
+    use std::{
+        collections::BTreeMap,
+        net::{TcpListener, TcpStream},
+        sync::Arc,
+        time::Duration,
+    };
+    let count = argument("units", 2000);
+    let ticks = argument("ticks", 900);
+    assert!((2..=20_000).contains(&count) && (1..=1_000_000).contains(&ticks));
+    let rules = Arc::new(Rules {
+        units: vec![UnitDef {
+            name: "network-test-tank".into(),
+            health: 1_000_000,
+            speed: 1,
+            cost: 100,
+            weapon: Some(Weapon {
+                damage: 10,
+                range: 4,
+                reload_ticks: 15,
+            }),
+            build_ticks: 30,
+            power: 0,
+            factory: false,
+            harvester: false,
+        }],
+        max_entities: count,
+    });
+    let mut a = Skirmish::new(
+        rules,
+        NavigationMap::new(64, 64),
+        BTreeMap::from([
+            (
+                0,
+                Player {
+                    credits: 1000,
+                    defeated: false,
+                },
+            ),
+            (
+                1,
+                Player {
+                    credits: 1000,
+                    defeated: false,
+                },
+            ),
+        ]),
+    )
+    .unwrap();
+    let entries: Vec<_> = (0..count)
+        .map(|i| {
+            (
+                (i % 2) as u32,
+                0,
+                Vec2::new((i % 64) as i32, ((i / 64) % 64) as i32),
+            )
+        })
+        .collect();
+    a.populate(&entries).unwrap();
+    let initial = a.save().unwrap();
+    let mut b = Skirmish::load(&initial).unwrap();
+    let session = Session {
+        token: [97; 16],
+        initial_hash: a.state_hash(),
+        tick: 0,
+    };
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let outgoing = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (incoming, _) = listener.accept().unwrap();
+    let mut left = Peer::new(outgoing, session, 0, 1).unwrap();
+    let mut right = Peer::new(incoming, session, 1, 0).unwrap();
+    let mut first = GameLockstep::new([0, 1], 0, 2).unwrap();
+    let mut second = GameLockstep::new([0, 1], 0, 2).unwrap();
+    let mut recorded = Vec::new();
+    let start = Instant::now();
+    for tick in 0..ticks as u64 {
+        let frame = |player| Frame {
+            tick,
+            player,
+            commands: if tick % 120 == 0 {
+                vec![Command {
+                    tick,
+                    player,
+                    sequence: tick,
+                    action: Action::Move {
+                        units: a
+                            .entities()
+                            .filter(|(_, actor)| actor.owner == player)
+                            .take(64)
+                            .map(|(id, _)| id)
+                            .collect(),
+                        goal: Vec2::new(if player == 0 { 29 } else { 33 }, 32),
+                    },
+                }]
+            } else {
+                vec![]
+            },
+        };
+        let blue = frame(0);
+        let red = frame(1);
+        recorded.extend(blue.commands.clone());
+        recorded.extend(red.commands.clone());
+        first.submit(0, blue.clone()).unwrap();
+        second.submit(1, red.clone()).unwrap();
+        left.send(&blue).unwrap();
+        right.send(&red).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            for frame in left.poll().unwrap() {
+                first.submit(1, frame).unwrap();
+            }
+            for frame in right.poll().unwrap() {
+                second.submit(0, frame).unwrap();
+            }
+            if first.missing_players().is_empty() && second.missing_players().is_empty() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "network input timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let left_commands = first.take_ready().unwrap();
+        let right_commands = second.take_ready().unwrap();
+        assert_eq!(left_commands, right_commands);
+        for (left_command, right_command) in left_commands.iter().zip(&right_commands) {
+            assert_eq!(
+                left_command.action.apply(&mut a, left_command.player),
+                right_command.action.apply(&mut b, right_command.player)
+            );
+        }
+        a.tick();
+        b.tick();
+        assert_eq!(
+            a.state_hash(),
+            b.state_hash(),
+            "network divergence at {tick}"
+        );
+    }
+    let replay = GameReplay {
+        initial,
+        ticks: ticks as u64,
+        commands: recorded,
+    };
+    let bytes = replay.encode().unwrap();
+    let restored = GameReplay::decode(&bytes).unwrap().play(30).unwrap();
+    assert_eq!(restored.game.state_hash(), a.state_hash());
+    println!(
+        "tcp_game_replay_verified=true; peers=2; units={count}; ticks={ticks}; replay_bytes={}; elapsed_ms={:.3}; state_hash={:016x}",
+        bytes.len(),
+        start.elapsed().as_secs_f64() * 1000.0,
+        a.state_hash()
+    );
 }

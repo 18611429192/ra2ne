@@ -23,6 +23,9 @@ impl NavigationMap {
         }
     }
 
+    pub fn dimensions(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
     pub fn state_hash(&self) -> u64 {
         let mut hash = 0xcbf2_9ce4_8422_2325u64;
         for value in [self.width as u64, self.height as u64].into_iter().chain(
@@ -121,6 +124,34 @@ pub struct SharedRoute {
 }
 
 impl SharedRoute {
+    pub(crate) fn checkpoint_parts(&self) -> (usize, usize, Vec2, &[usize], &[usize]) {
+        (
+            self.width,
+            self.height,
+            self.goal,
+            &self.distance,
+            &self.capacity,
+        )
+    }
+    pub(crate) fn restore_parts(
+        width: usize,
+        height: usize,
+        goal: Vec2,
+        distance: Vec<usize>,
+        capacity: Vec<usize>,
+    ) -> Result<Self, &'static str> {
+        let mut map = NavigationMap::new(width, height);
+        for (index, (&d, &c)) in distance.iter().zip(&capacity).enumerate() {
+            map.walkable[index] = d != usize::MAX;
+            map.capacity[index] = c;
+        }
+        let route = map.route_to(goal).ok_or("invalid checkpoint route goal")?;
+        if route.distance != distance {
+            return Err("invalid checkpoint route distances");
+        }
+        Ok(route)
+    }
+
     pub(crate) fn capacity_at(&self, p: Vec2) -> usize {
         self.capacity[p.y as usize * self.width + p.x as usize]
     }

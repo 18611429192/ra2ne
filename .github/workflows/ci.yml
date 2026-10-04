@@ -1,0 +1,22 @@
+name: Engine checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo run --release -p ra2ne-bench -- --game-check --units=2000 --ticks=300
+      - run: cargo run --release -p ra2ne-runtime -- --battle --autoplay --units=512 --headless-ticks=900
+      - run: cargo run --release -p ra2ne-bench -- --network-check --units=512 --ticks=90

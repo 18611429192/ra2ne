@@ -429,6 +429,7 @@ version = "0.1.0"
 dependencies = [
  "ra2ne-assets",
  "ra2ne-core",
+ "ra2ne-game",
 ]
 
 [[package]]
@@ -456,6 +457,7 @@ dependencies = [
  "macroquad",
  "ra2ne-assets",
  "ra2ne-core",
+ "ra2ne-game",
 ]
 
 [[package]]

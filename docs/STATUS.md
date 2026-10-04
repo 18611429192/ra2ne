@@ -151,10 +151,9 @@ recorded in FORMAT_NOTES.md. No original asset fixture was available here.
 - `ra2ne-game`: generation-checked entity handles, atomic owner-validated commands,
   spatial combat queries, simultaneous damage, production queues, credit
   reservations/refunds, power pause, blocked exits and winner detection.
-  Definitions currently use explicit engine timings; the original rules adapter,
-  harvesting, defeat/draw policy, attack pursuit and full game saves are pending.
-  The interactive application still exercises movement rather than this complete
-  game layer. Initial population has a bulk API to avoid repeated spatial rebuilds.
+  Initial population uses one spatial rebuild. The later update below adds
+  harvesting, attack pursuit, draw handling, saves and runtime integration.
+  Definitions still use explicit engine timings; original RA2 rules remain pending.
 - Workspace tests and strict Clippy pass. Two headless runs with 10,000 units and
   900 Ticks produced the same hash `7497f64dc6800336`.
 - A native window could not be visually validated in this environment because
@@ -163,3 +162,51 @@ recorded in FORMAT_NOTES.md. No original asset fixture was available here.
 
 Original assets/maps/mods, complete skirmish, actual network transport and full
 save/replay integration remain required before a 1.0 release.
+
+
+## Full synthetic skirmish, saves and transport
+
+- `--battle` integrates combat, production and the synthetic harvesting loop into
+  the interactive runtime. Right click attacks an enemy cell or moves; `B` queues
+  a tank. Health bars, resources, credits and power are visible. Physical unit
+  occupancy/avoidance and original movement timing are still pending.
+- Harvesters reserve no resources ahead of time: stable entity order gathers one
+  unit per Tick, holds 30 units, returns and deposits at 25 credits/unit. Factories
+  double as depots only in this synthetic fixture, not as original RA2 semantics.
+- Attack pursuit groups paths by target; victory/draw freeze further simulation.
+  The current elimination condition counts all actors. Original ShortGame rules,
+  alliances, AI, base construction and sale/repair remain unimplemented.
+- Engine saves embed definitions, map, unit generations, shared path fields,
+  combat state, resources, harvesting and production. Loads are bounded and reject
+  malformed topology, unknown versions, truncation, trailing bytes and hash
+  mismatches. They do not read original RA2 saves.
+- Full game commands have canonical ordering, bounded input barriers, explicit
+  empty frames and deterministic rejected-command records. Full replay files
+  embed an initial save. Input frames have a bounded binary wire format.
+- Nonblocking TCP peers validate a session token, player identity, initial state
+  hash and Tick. Queues and poll work are bounded. Actual loopback tests exercise
+  fragmented messages, mismatched state, invalid lengths and input barriers.
+  Lobby/UI integration, encryption, reconnect, internet sessions and multiplayer
+  acceptance are pending.
+- Linux software-rendered window verification completed: 120 frames, screenshot
+  visually inspected, same state hash as headless at 120 Ticks. An initial black
+  screenshot exposed a capture-after-swap bug, which was fixed and rechecked.
+  Input interaction, hardware GPU and Windows rendering have not been validated.
+- Continuous 900-Tick execution matches saving at Tick 450 and restoring for 450
+  Ticks. Save tests also compare all events and hashes for 100 future Ticks and
+  reject every truncation and single-byte corruption of a fixture.
+- A sustained 10,000-unit/900-Tick combat fixture uses enough health to keep actors
+  alive throughout: two runs have 31 identical checkpoints, approximately
+  2.50 ms/Tick on this machine. The earlier 0.96 ms fixture included idle calls
+  after combat ended and is not a sustained combat measurement.
+- CI is configured for Linux, Windows and macOS tests, strict Clippy, headless
+  runtime and deterministic combat benchmarks. Remote CI results are pending.
+
+This remains a foundation rather than RA2NE 1.0. Original resource/theater/voxel/
+map/rule behavior, ordinary mods, audio, AI, construction and complete multiplayer
+still require implementation and original-game acceptance fixtures.
+
+End-to-end TCP verification additionally ran two independent 2,000-unit games
+through 900 Ticks over a real localhost connection. Each Tick's state matched;
+encoding, decoding and replaying the recorded full-game commands produced the
+same final hash `5a835421a4a3e97a` (147,993-byte replay fixture).

@@ -1,5 +1,7 @@
 //! Interactive engine preview. Synthetic scenario plus decoded map/sprite views.
 //! This is an integration milestone, not the finished RA2/YR game.
+mod battle;
+use battle::Simulation;
 use macroquad::prelude::*;
 use ra2ne_assets::{
     map::Ra2Map,
@@ -21,6 +23,9 @@ struct Options {
     screenshot: Option<String>,
     headless_ticks: Option<u64>,
     autoplay: bool,
+    battle: bool,
+    load_game: Option<String>,
+    save_game: Option<String>,
 }
 impl Options {
     fn parse() -> Result<Self, String> {
@@ -29,7 +34,13 @@ impl Options {
             ..Default::default()
         };
         for arg in std::env::args().skip(1) {
-            if arg == "--autoplay" {
+            if arg == "--battle" {
+                options.battle = true;
+            } else if let Some(v) = arg.strip_prefix("--load-game=") {
+                options.load_game = Some(v.into());
+            } else if let Some(v) = arg.strip_prefix("--save-game=") {
+                options.save_game = Some(v.into());
+            } else if arg == "--autoplay" {
                 options.autoplay = true;
             } else if let Some(v) = arg.strip_prefix("--units=") {
                 options.units = v.parse().map_err(|_| "invalid unit count")?;
@@ -51,6 +62,19 @@ impl Options {
             } else {
                 return Err(format!("unknown option: {arg}"));
             }
+        }
+        if options.map.is_some() && (options.battle || options.load_game.is_some()) {
+            return Err("original map gameplay adapter is pending".into());
+        }
+        if options
+            .save_game
+            .as_ref()
+            .is_some_and(|p| std::path::Path::new(p).exists())
+        {
+            return Err("save output already exists".into());
+        }
+        if options.save_game.is_some() && !options.battle && options.load_game.is_none() {
+            return Err("game save requires battle mode".into());
         }
         if options.units > 20_000 {
             return Err("preview supports up to 20000 units".into());
@@ -75,7 +99,7 @@ impl Options {
     }
 }
 struct Scene {
-    world: World,
+    world: Simulation,
     map: NavigationMap,
     tiles: Vec<(Cell, u8)>,
     owners: Vec<u8>,
@@ -98,6 +122,34 @@ fn read(path: &str, limit: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 impl Scene {
+    fn tick(&mut self) {
+        self.world.tick();
+        if let Simulation::Battle(game) = &self.world {
+            self.owners = (0..game.movement().unit_count())
+                .map(|i| {
+                    game.entity_at(i)
+                        .and_then(|id| game.actor(id))
+                        .map_or(255, |a| a.owner as u8)
+                })
+                .collect();
+        }
+    }
+    fn save(&self, options: &Options) -> Result<(), String> {
+        if let Some(path) = &options.save_game {
+            let Simulation::Battle(game) = &self.world else {
+                return Err("game save requires battle mode".into());
+            };
+            let bytes = game.save()?;
+            use std::io::Write;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .and_then(|mut f| f.write_all(&bytes))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
     fn load(options: &Options) -> Result<Self, String> {
         let sprite = match (&options.sprite, &options.palette) {
             (Some(shp), Some(pal)) => {
@@ -107,7 +159,7 @@ impl Scene {
             }
             _ => None,
         };
-        let (mut map, tiles, units, owners, name, map_view_only, messages, center) =
+        let (mut map, mut tiles, units, mut owners, mut name, map_view_only, messages, center) =
             if let Some(path) = &options.map {
                 let bytes = read(path, 16 * 1024 * 1024)?;
                 let text = options
@@ -218,6 +270,45 @@ impl Scene {
                 Cell::new(50, 32),
             )?;
         }
+        let mut world = if let Some(path) = &options.load_game {
+            let game = ra2ne_game::Skirmish::load(&read(path, 128 * 1024 * 1024)?)?;
+            map = game.map().clone();
+            let (width, height) = map.dimensions();
+            tiles = (0..height)
+                .flat_map(|y| (0..width).map(move |x| Cell::new(x as i32, y as i32)))
+                .filter(|&p| map.is_traversable(p))
+                .map(|p| (p, 0))
+                .collect();
+            name = "Restored synthetic skirmish".into();
+            Simulation::Battle(Box::new(game))
+        } else if options.battle {
+            name = "Synthetic skirmish".into();
+            Simulation::Battle(Box::new(battle::synthetic(map.clone(), options.units)?))
+        } else {
+            Simulation::Movement(world)
+        };
+        if options.autoplay
+            && options.load_game.is_none()
+            && let Simulation::Battle(game) = &mut world
+        {
+            for owner in 0..2 {
+                let ids = game
+                    .entities()
+                    .filter(|(_, a)| a.owner == owner && a.kind == 0)
+                    .map(|(id, _)| id)
+                    .collect::<Vec<_>>();
+                game.move_units(owner, &ids, Cell::new(if owner == 0 { 30 } else { 34 }, 32))?;
+            }
+        }
+        if let Simulation::Battle(game) = &world {
+            owners = (0..game.movement().unit_count())
+                .map(|i| {
+                    game.entity_at(i)
+                        .and_then(|id| game.actor(id))
+                        .map_or(255, |a| a.owner as u8)
+                })
+                .collect();
+        }
         Ok(Self {
             world,
             map,
@@ -283,7 +374,11 @@ fn main() {
         Ok((options, mut scene)) => {
             if let Some(ticks) = options.headless_ticks {
                 for _ in 0..ticks {
-                    scene.world.tick();
+                    scene.tick();
+                }
+                if let Err(error) = scene.save(&options) {
+                    eprintln!("ra2ne-runtime: {error}");
+                    std::process::exit(1);
                 }
                 println!(
                     "runtime_headless=true; units={}; ticks={}; state_hash={:016x}",
@@ -352,8 +447,12 @@ async fn run(options: Options, mut scene: Scene) {
                 } else {
                     let target = view.cell(mouse);
                     let ids: Vec<_> = selected.iter().copied().collect();
-                    status = match scene.world.move_group(&ids, &scene.map, target) {
-                        Ok(()) => format!("Moving {} units", ids.len()),
+                    status = match scene
+                        .world
+                        .attack_at(&ids, target)
+                        .unwrap_or_else(|| scene.world.move_group(&ids, &scene.map, target))
+                    {
+                        Ok(()) => format!("Command accepted for {} units", ids.len()),
                         Err(_) => "Destination is outside the map or blocked".into(),
                     };
                 }
@@ -407,8 +506,24 @@ async fn run(options: Options, mut scene: Scene) {
             scene
                 .world
                 .stop_group(&selected.iter().copied().collect::<Vec<_>>())
-                .unwrap();
+                .ok();
             status = "Selected units stopped".into();
+        }
+        if is_key_pressed(KeyCode::B)
+            && let Simulation::Battle(game) = &mut scene.world
+        {
+            let factory = game
+                .entities()
+                .find(|(_, a)| a.owner == 0 && game.rules().units[a.kind].factory)
+                .map(|(id, _)| id);
+            status = if let Some(factory) = factory {
+                match game.queue_production(0, factory, 0) {
+                    Ok(()) => "Tank queued".into(),
+                    Err(error) => error.into(),
+                }
+            } else {
+                "No factory".into()
+            };
         }
         let pan = 500.0 * get_frame_time() / view.zoom;
         if is_key_down(KeyCode::Left) {
@@ -426,14 +541,22 @@ async fn run(options: Options, mut scene: Scene) {
         previous_mouse = mouse;
         if !paused {
             if options.smoke_frames.is_some() {
-                scene.world.tick();
+                scene.tick();
             } else {
                 accumulator += get_frame_time().min(0.25);
                 let mut steps = 0;
                 while accumulator >= 1.0 / 30.0 && steps < 8 {
-                    scene.world.tick();
+                    scene.tick();
                     accumulator -= 1.0 / 30.0;
                     steps += 1;
+                }
+            }
+        }
+        selected.retain(|&id| scene.world.alive(id) && scene.owners[id] == 0);
+        if let Simulation::Battle(game) = &scene.world {
+            for event in game.events() {
+                if let ra2ne_game::Event::Destroyed { entity } = event {
+                    selected.remove(&(entity.index as usize));
                 }
             }
         }
@@ -453,6 +576,11 @@ async fn run(options: Options, mut scene: Scene) {
                 Color::from_rgba(60, 77, 50, 255)
             };
             diamond(pos, 60.0 * view.zoom, 30.0 * view.zoom, tint);
+            if let Simulation::Battle(game) = &scene.world
+                && game.resource(p) > 0
+            {
+                draw_circle(pos.x, pos.y, 5.0 * view.zoom, GOLD);
+            }
             if grid {
                 diamond(
                     pos,
@@ -464,6 +592,9 @@ async fn run(options: Options, mut scene: Scene) {
         }
         let mut visible: Vec<_> = (0..scene.world.unit_count())
             .filter_map(|id| {
+                if !scene.world.alive(id) {
+                    return None;
+                }
                 let unit = scene.world.unit(id).unwrap();
                 let p = view.screen(unit.position, 0);
                 (p.x >= -80.0
@@ -480,6 +611,14 @@ async fn run(options: Options, mut scene: Scene) {
             } else {
                 Color::from_rgba(220, 100, 72, 255)
             };
+            if let Simulation::Battle(game) = &scene.world
+                && let Some(entity) = game.entity_at(*id)
+                && let Some(actor) = game.actor(entity)
+            {
+                let fraction = actor.health as f32 / game.rules().units[actor.kind].health as f32;
+                draw_rectangle(p.x - 10.0, p.y - 20.0, 20.0, 3.0, DARKGRAY);
+                draw_rectangle(p.x - 10.0, p.y - 20.0, 20.0 * fraction, 3.0, GREEN);
+            }
             if selected.contains(id) {
                 draw_ellipse_lines(
                     p.x,
@@ -542,7 +681,6 @@ async fn run(options: Options, mut scene: Scene) {
         draw_hud(&scene, &selected, &status, paused, debug, visible.len());
         frames += 1;
         if options.smoke_frames.is_some_and(|limit| frames >= limit) {
-            next_frame().await;
             if let Some(path) = &options.screenshot {
                 get_screen_data().export_png(path);
             }
@@ -555,6 +693,9 @@ async fn run(options: Options, mut scene: Scene) {
             break;
         }
         next_frame().await;
+    }
+    if let Err(error) = scene.save(&options) {
+        eprintln!("ra2ne-runtime: {error}");
     }
 }
 fn draw_hud(
@@ -587,7 +728,7 @@ fn draw_hud(
     draw_text(
         format!(
             "{} units / {} selected",
-            scene.world.unit_count(),
+            scene.world.live_count(),
             selected.len()
         ),
         left + 22.0,
@@ -605,6 +746,9 @@ fn draw_hud(
     );
     let max = if scene.map_view_only { 512.0 } else { 64.0 };
     for id in 0..scene.world.unit_count() {
+        if !scene.world.alive(id) {
+            continue;
+        }
         let p = scene.world.unit(id).unwrap().position;
         draw_rectangle(
             minimap.x + p.x as f32 / max * minimap.w,
@@ -681,6 +825,18 @@ fn draw_hud(
             16.0,
             WHITE,
         );
+    }
+    if let Simulation::Battle(game) = &scene.world {
+        let label = if game.finished() {
+            format!("Result: {:?}", game.winner())
+        } else {
+            format!(
+                "Credits {} / power {} / B: build tank",
+                game.players().get(&0).map_or(0, |p| p.credits),
+                game.power_balance(0)
+            )
+        };
+        draw_text(&label, 22.0, screen_height() - 72.0, 16.0, WHITE);
     }
     if let Some(message) = scene.messages.first() {
         draw_text(

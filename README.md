@@ -106,3 +106,25 @@ cargo run --release -p ra2ne-runtime -- --sprite=example.shp --palette=example.p
 
 The map option currently opens a data viewer. Full original skirmish is not yet
 implemented; see `docs/STATUS.md` for the remaining 1.0 acceptance work.
+
+Synthetic skirmish and engine saves:
+
+```sh
+cargo run --release -p ra2ne-runtime -- --battle --units=512
+cargo run --release -p ra2ne-runtime -- --battle --autoplay --units=512 --headless-ticks=450 --save-game=midpoint.ra2nsave
+cargo run --release -p ra2ne-runtime -- --load-game=midpoint.ra2nsave --headless-ticks=450
+cargo run --release -p ra2ne-bench -- --game-check --units=10000 --ticks=900
+```
+
+Battle mode has two synthetic armies, factories and harvesters. Right click an
+occupied enemy cell to attack, or another cell to move; `B` queues a tank.
+Save output uses create-new semantics and refuses to overwrite an existing file.
+These fixtures use explicit engine rules and do not reproduce original RA2 gameplay.
+
+Two-peer TCP synchronization plus full-game replay verification:
+
+```sh
+cargo run --release -p ra2ne-bench -- --network-check --units=2000 --ticks=900
+```
+
+This is an automated local connection fixture, not a multiplayer lobby.

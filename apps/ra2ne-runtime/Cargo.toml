@@ -8,3 +8,4 @@ license.workspace = true
 ra2ne-core = { path = "../../crates/ra2ne-core" }
 ra2ne-assets = { path = "../../crates/ra2ne-assets" }
 macroquad = { version = "0.4.16", default-features = false }
+ra2ne-game = { path = "../../crates/ra2ne-game" }
