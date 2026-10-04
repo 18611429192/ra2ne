@@ -4,8 +4,10 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+pub mod lockstep;
 pub mod navigation;
 pub mod replay;
+pub mod replay_file;
 use navigation::{NavigationMap, SharedRoute};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

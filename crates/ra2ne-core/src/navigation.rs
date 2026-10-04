@@ -23,9 +23,25 @@ impl NavigationMap {
         }
     }
 
+    pub(crate) fn snapshot(&self) -> (usize, usize, impl Iterator<Item = (bool, usize)> + '_) {
+        (
+            self.width,
+            self.height,
+            self.walkable
+                .iter()
+                .copied()
+                .zip(self.capacity.iter().copied()),
+        )
+    }
+
     fn index(&self, p: Vec2) -> Option<usize> {
         (p.x >= 0 && p.y >= 0 && (p.x as usize) < self.width && (p.y as usize) < self.height)
             .then(|| p.y as usize * self.width + p.x as usize)
+    }
+
+    pub fn is_traversable(&self, p: Vec2) -> bool {
+        self.index(p)
+            .is_some_and(|i| self.walkable[i] && self.capacity[i] > 0)
     }
 
     pub fn set_walkable(&mut self, p: Vec2, walkable: bool) -> bool {

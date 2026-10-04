@@ -1,4 +1,6 @@
+use ra2ne_core::lockstep::{InputFrame, Lockstep};
 use ra2ne_core::replay::{CommandLog, MoveCommand};
+use ra2ne_core::replay_file::ReplayFile;
 use ra2ne_core::{TICKS_PER_SECOND, Unit, Vec2, World, navigation::NavigationMap};
 use std::{env, time::Instant};
 
@@ -13,6 +15,25 @@ fn argument(name: &str, default: usize) -> usize {
 }
 
 fn main() {
+    if let Some(path) =
+        env::args().find_map(|arg| arg.strip_prefix("--replay-input=").map(str::to_owned))
+    {
+        let file = std::fs::File::open(path).expect("open replay");
+        let mut bytes = Vec::new();
+        use std::io::Read;
+        file.take(64 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .expect("read replay");
+        let replay = ReplayFile::decode(&bytes).expect("decode replay");
+        let playback = replay.play().expect("play replay");
+        println!(
+            "file_replay_verified=true; ticks={}; checkpoints={}; state_hash={:016x}",
+            playback.world.tick_number(),
+            playback.checkpoints.len(),
+            playback.world.state_hash()
+        );
+        return;
+    }
     let units = argument("units", 10_000);
     let ticks = argument("ticks", 900);
     assert!(ticks > 0, "ticks must be positive");
@@ -103,14 +124,73 @@ fn replay_check(count: usize, ticks: u64) {
     let mut b = CommandLog::default();
     a.insert(first.clone()).unwrap();
     a.insert(second.clone()).unwrap();
-    b.insert(second).unwrap();
-    b.insert(first).unwrap();
+    let mut barrier = Lockstep::new(&[0, 1], ticks, 4, count).unwrap();
+    if ticks == 1 {
+        barrier
+            .submit(InputFrame {
+                tick: 0,
+                player: 0,
+                commands: vec![second, first],
+            })
+            .unwrap();
+    } else {
+        for command in [second, first] {
+            barrier
+                .submit(InputFrame {
+                    tick: command.tick,
+                    player: command.player,
+                    commands: vec![command],
+                })
+                .unwrap();
+        }
+    }
+    for tick in 0..ticks {
+        if tick != 0 && tick != ticks / 2 {
+            barrier
+                .submit(InputFrame {
+                    tick,
+                    player: 0,
+                    commands: vec![],
+                })
+                .unwrap();
+        }
+        assert!(barrier.take_ready().unwrap().is_none());
+        barrier
+            .submit(InputFrame {
+                tick,
+                player: 1,
+                commands: vec![],
+            })
+            .unwrap();
+        for command in barrier.take_ready().unwrap().unwrap() {
+            b.insert(command).unwrap();
+        }
+    }
     let started = Instant::now();
     let a = a.play(initial.clone(), &map, ticks, 30).unwrap();
-    let b = b.play(initial, &map, ticks, 30).unwrap();
+    let recording = ReplayFile {
+        units: initial,
+        map,
+        commands: b,
+        ticks,
+        checkpoint_interval: 30,
+    };
+    let encoded = recording.encode().unwrap();
+    if let Some(path) =
+        env::args().find_map(|arg| arg.strip_prefix("--replay-output=").map(str::to_owned))
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .expect("create replay (existing files are preserved)");
+        file.write_all(&encoded).expect("write replay");
+    }
+    let b = ReplayFile::decode(&encoded).unwrap().play().unwrap();
     assert_eq!(a.checkpoints, b.checkpoints, "replay desynchronization");
     println!(
-        "replay_verified=true; units={count}; ticks={ticks}; checkpoints={}; state_hash={:016x}; two_playbacks_ms={:.3}",
+        "replay_verified=true; lockstep_verified=true; file_roundtrip_verified=true; units={count}; ticks={ticks}; checkpoints={}; state_hash={:016x}; verification_ms={:.3}",
         a.checkpoints.len(),
         a.world.state_hash(),
         started.elapsed().as_secs_f64() * 1000.0

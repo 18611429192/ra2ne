@@ -15,6 +15,8 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 - shared reverse-BFS paths for batch movement on bounded walkability grids
 - deterministic bridge entry limits and waiting/arrival/unreachable states
 - tick-stamped command playback and checkpoint-based replay verification
+- bounded transport-independent multiplayer input barrier
+- versioned self-contained replay files with corruption checks and bounded decoding
 - no rendering, assets, or compatibility code yet
 
 ## Run
@@ -25,11 +27,23 @@ cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900
 cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900 --scenario=bridge
 ```
 
-Replay determinism smoke check (two playbacks with reversed command arrival):
+Replay determinism smoke check (reference log versus lockstep input and file round trip):
 
 ```bash
 cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900 --replay-check
 ```
+
+Save and replay a recording (output refuses to overwrite an existing file):
+
+```bash
+cargo run -p ra2ne-bench --release -- --replay-check --replay-output=session.rpl
+cargo run -p ra2ne-bench --release -- --replay-input=session.rpl
+```
+
+Replay format v1 is for the current abstract simulation. Its checksum detects
+corruption; it does not authenticate recordings. Changing simulation semantics
+requires a format-version change. Network transport and playable multiplayer
+are still pending.
 
 ## Project principles
 

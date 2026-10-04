@@ -29,7 +29,9 @@ This is an in-memory replay foundation. Persistence, network transport, player o
 ## Remaining 1.0 acceptance scope
 
 - [x] In-memory tick-stamped movement commands and replay checkpoint verification.
-- [ ] Replay file format, metadata validation and network lockstep.
+- [x] Versioned replay files with bounded decoding and timing/command validation.
+- [x] Transport-independent lockstep input barrier.
+- [ ] Network transport, authenticated roster/ownership, disconnect policy and desync exchange.
 - [ ] Local avoidance, physical occupancy, fair bottleneck queues, formation movement, dynamic terrain invalidation.
 - [ ] Resource frontend: user-owned RA2/YR data, VFS, MIX archives and required codecs.
 - [ ] Map and INI rules loading with explicit unsupported-feature diagnostics.
@@ -40,3 +42,37 @@ This is an in-memory replay foundation. Persistence, network transport, player o
 - [ ] Full-game performance and deterministic cross-platform verification.
 
 1.0 is not complete. Ares/Phobos complete compatibility remains a later goal. No original game assets are distributed.
+
+## 2026-10-04: transport-independent lockstep input barrier
+
+Added fixed player rosters, explicit empty input frames, missing-player stalls,
+canonical command ordering, idempotent retransmissions and atomic conflict
+rejection. Input lead, commands per frame and selections are bounded by caller
+limits. Authentication, unit ownership, timeout/disconnect policy, desync hash
+exchange and network transport remain pending; this is not playable multiplayer.
+
+Verification: 19 tests, Clippy and Release passed. The replay smoke check now
+collects commands through a two-player barrier with reversed future arrival and
+missing-frame assertions: 10,000 units / 900 ticks / 31 checkpoints match the
+reference log, final hash 4c5d69f610b38d8a; two playbacks 351.768 ms. One-tick
+boundary also passed. Bridge simulation 0.223 ms/Tick, hash c0c6b5571b31487c.
+
+## 2026-10-04: self-contained replay persistence
+
+Format v1 stores explicit initial units, complete abstract navigation map,
+capacity limits, ordered commands, simulation rate and playback timing. Fixed
+little-endian integer encoding and an FNV checksum detect accidental corruption.
+Decoding bounds bytes (64 MiB), cells (1,048,576), units/commands (100,000 each)
+and ticks (1,000,000), checks lengths before allocation, rejects unsupported
+versions/rates, invalid IDs/goals/speeds and trailing data. Capacity sentinels
+are normalized; actual cross-platform verification is still pending. No original
+RA2 format or asset compatibility is claimed. The file version must change when
+simulation semantics change. A checksum is not authentication, and CPU execution
+budgets for untrusted recordings remain the embedding application's responsibility.
+
+CLI supports --replay-output= and --replay-input=; output uses create-new to
+preserve existing files. Verification: 22 tests, Clippy, Release passed; all
+single-byte corruptions and all truncations of a fixture are rejected. 10,000
+units / 900 ticks: reference and decoded lockstep recording agree at 31
+checkpoints, hash 4c5d69f610b38d8a, total verification 358.935 ms. A separate
+process read the persisted file with the same hash. One-tick boundary passed.

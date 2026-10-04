@@ -20,6 +20,10 @@ pub struct CommandLog {
 }
 
 impl CommandLog {
+    pub fn commands(&self) -> impl Iterator<Item = &MoveCommand> {
+        self.commands.values()
+    }
+
     pub fn insert(&mut self, mut command: MoveCommand) -> Result<(), &'static str> {
         let key = (command.tick, command.player, command.sequence);
         if self.commands.contains_key(&key) {
