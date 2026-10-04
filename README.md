@@ -12,6 +12,8 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 - clamped, integer-only movement primitive (no goal overshoot)
 - spatial broad phase with deterministic neighbourhood queries
 - pure-simulation benchmark for 10,000 units
+- shared reverse-BFS paths for batch movement on bounded walkability grids
+- deterministic bridge entry limits and waiting/arrival/unreachable states
 - no rendering, assets, or compatibility code yet
 
 ## Run
@@ -19,6 +21,7 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 ```bash
 cargo test --workspace
 cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900
+cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900 --scenario=bridge
 ```
 
 ## Project principles
@@ -28,3 +31,5 @@ cargo run -p ra2ne-bench --release -- --units=10000 --ticks=900
 3. Implement Ares/Phobos INI semantics over time; never load legacy DLL hooks.
 4. Parallel work must commit deterministically.
 5. Core hot paths must not default to O(N²).
+
+See [development status](docs/STATUS.md) for verified progress and remaining 1.0 scope.
