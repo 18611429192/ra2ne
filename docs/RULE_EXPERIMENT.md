@@ -105,8 +105,8 @@ factories without typed restrictions retain their fixture behavior.
 The library fixture `fixtures/production-experiment.ini` exercises vehicle and
 infantry factories with an exact laboratory prerequisite. It is covered by
 `cargo test -p ra2ne-game imported_factories_enforce_categories_prerequisites_and_replay`.
-The runtime's two-army rule preview does not yet auto-place factories or provide
-an original build sidebar; this test is not original skirmish acceptance.
+The runtime can explicitly place factory/prerequisite buildings using the options
+below; this test is not original skirmish acceptance.
 
 
 General prerequisite aliases now resolve POWER/FACTORY/BARRACKS/RADAR/TECH/PROC
@@ -127,5 +127,36 @@ compatibility is claimed.
 
 `fixtures/prerequisite-groups.ini` overlays `production-experiment.ini` with
 standard and custom groups. Engine tests exercise group ownership and save/replay;
-source tests exercise overrides and malformed definitions. The preview still
-does not auto-place production buildings or implement an original build sidebar.
+source tests exercise overrides and malformed definitions. The preview supports explicit experimental base placement and production controls;
+an original build sidebar and construction remain pending.
+
+
+## Experimental production scene
+
+`--rule-building=ID` (repeatable, at most 32) places one registered building of
+that type for each player in free walkable base slots. This places fixture
+buildings directly; it does not implement construction or original footprints.
+`--rule-queue=ID` (repeatable, at most 32) queues the product for each player at
+the first eligible factory. Invalid IDs, wrong categories, missing prerequisites,
+insufficient credits and unavailable base slots fail scene creation explicitly.
+Each player starts with 2000 credits; initial orders reserve their full cost.
+
+```sh
+cargo run -p ra2ne-runtime -- --units=8 \
+  --rules-experiment=fixtures/production-experiment.ini \
+  --rule-unit=TESTTANK --rule-speed=5:1 --rule-rof=1:1 \
+  --rule-build-ticks=90 \
+  --rule-building=TESTFACTORY --rule-building=TESTBARRACKS \
+  --rule-building=TESTLAB \
+  --rule-queue=TESTTANK --rule-queue=TESTINFANTRY
+```
+
+The experimental sidebar uses the selected owned factory, or the first owned
+factory when none is selected. Mobile definitions are paged with cost and
+availability; hovering a disabled product shows the engine's rejection reason.
+Click an available product to queue it, or cancel the first job for a full refund.
+The queue displays its length and first job's remaining simulation ticks; low
+power is displayed as a pause. B queues the first eligible product at that
+factory. This is local preview input, not a multiplayer build interface.
+Existing `--save-game=PATH` / `--load-game=PATH` preserve bases and paid queues.
+Formats remain v5 because no serialized gameplay state changed.

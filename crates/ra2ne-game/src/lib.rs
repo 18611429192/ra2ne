@@ -471,9 +471,10 @@ impl Skirmish {
     pub fn production(&self, factory: EntityId) -> Option<&VecDeque<Production>> {
         self.production.get(&factory)
     }
-    /// Payment is reserved when queued. A cancelled job refunds its reservation.
-    pub fn queue_production(
-        &mut self,
+    /// Checks enqueue eligibility without changing state. Low power pauses paid jobs
+    /// rather than preventing orders.
+    pub fn production_available(
+        &self,
         player: u32,
         factory: EntityId,
         kind: usize,
@@ -503,10 +504,22 @@ impl Skirmish {
         if self.production.get(&factory).is_some_and(|q| q.len() >= 32) {
             return Err("production queue full");
         }
-        let account = self.players.get_mut(&player).unwrap();
+        let account = self.players.get(&player).unwrap();
         if account.credits < u64::from(definition.cost) {
             return Err("insufficient credits");
         }
+        Ok(())
+    }
+    /// Payment is reserved when queued. A cancelled job refunds its reservation.
+    pub fn queue_production(
+        &mut self,
+        player: u32,
+        factory: EntityId,
+        kind: usize,
+    ) -> Result<(), &'static str> {
+        self.production_available(player, factory, kind)?;
+        let definition = &self.rules.units[kind];
+        let account = self.players.get_mut(&player).unwrap();
         account.credits -= u64::from(definition.cost);
         self.production
             .entry(factory)

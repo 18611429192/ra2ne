@@ -147,3 +147,7 @@ cargo run --release -p ra2ne-runtime -- --rules-experiment=fixtures/rules-experi
 ```
 
 See [rule experiment limits](docs/RULE_EXPERIMENT.md) before importing your rules.
+
+Experimental production bases and sidebar controls are available through
+`--rule-building` and `--rule-queue`; see [RULE_EXPERIMENT.md](docs/RULE_EXPERIMENT.md)
+for the complete runnable fixture command and limits.

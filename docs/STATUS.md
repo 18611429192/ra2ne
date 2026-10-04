@@ -379,3 +379,25 @@ Verification on Rust 1.99.0 / Linux:
 Added a redistributable group-overlay fixture and source references. Overall
 1.0 feature coverage remains approximately 25%; original-content acceptance
 still needs major work. No new graphical/original-resource acceptance is claimed.
+
+
+## Experimental production controls (2026-10-04)
+
+- Added read-only production availability checks shared by queue validation and
+  the runtime sidebar, avoiding frontend copies of factory/prerequisite rules.
+- Experimental INI scenes accept explicit buildings and initial product orders
+  for both players, with bounded placement and explicit failures.
+- Sidebar supports factory selection, paged product costs/availability, queue
+  remaining ticks, low-power feedback, and first-job cancellation/refund.
+- Runtime integration tests cover both product categories, ownership rejection
+  without mutation, refund, completed production and deterministic save resume;
+  malformed base/product requests are rejected.
+- Original construction, footprints, factions and multiplayer production UI
+  remain pending. This milestone does not establish original skirmish acceptance.
+- Validation: 83 workspace tests passed; strict Clippy, format and release build
+  passed. Actual release CLI: 14 entities at tick 45, then 18 at tick 120.
+  Loading the tick-45 save and running 75 more ticks matched the uninterrupted
+  tick-120 hash `b0f9f90499dcd98c`.
+- Window/screenshot verification is pending in this environment: Xvfb is absent
+  and package installation could not obtain it. Sidebar layout is compiled but
+  has not been visually verified in this batch.

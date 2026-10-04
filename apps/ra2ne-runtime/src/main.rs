@@ -1,6 +1,7 @@
 //! Interactive engine preview. Synthetic scenario plus decoded map/sprite views.
 //! This is an integration milestone, not the finished RA2/YR game.
 mod battle;
+mod production_ui;
 mod rule_scenario;
 use battle::Simulation;
 use macroquad::prelude::*;
@@ -440,6 +441,7 @@ async fn run(options: Options, mut scene: Scene) {
     let mut debug = false;
     let mut accumulator = 0.0;
     let mut frames = 0_u64;
+    let mut production_page = 0;
     let mut status = String::from("Select units, then right-click a destination");
     loop {
         if is_key_pressed(KeyCode::Escape) {
@@ -538,14 +540,15 @@ async fn run(options: Options, mut scene: Scene) {
         if is_key_pressed(KeyCode::B)
             && let Simulation::Battle(game) = &mut scene.world
         {
-            let factory = game
-                .entities()
-                .find(|(_, a)| a.owner == 0 && game.rules().units[a.kind].factory)
-                .map(|(id, _)| id);
-            status = if let Some(factory) = factory {
-                match game.queue_production(0, factory, 0) {
-                    Ok(()) => "Tank queued".into(),
-                    Err(error) => error.into(),
+            status = if let Some(factory) = production_ui::factory(game, &selected) {
+                let kind = (0..game.rules().units.len())
+                    .find(|&kind| game.production_available(0, factory, kind).is_ok());
+                if let Some(kind) = kind {
+                    game.queue_production(0, factory, kind)
+                        .map(|()| "Production queued".into())
+                        .unwrap_or_else(str::to_owned)
+                } else {
+                    "No available product at this factory".into()
                 }
             } else {
                 "No factory".into()
@@ -705,6 +708,11 @@ async fn run(options: Options, mut scene: Scene) {
             );
         }
         draw_hud(&scene, &selected, &status, paused, debug, visible.len());
+        if let Simulation::Battle(game) = &mut scene.world
+            && let Some(message) = production_ui::draw(game, &selected, &mut production_page)
+        {
+            status = message;
+        }
         frames += 1;
         if options.smoke_frames.is_some_and(|limit| frames >= limit) {
             if let Some(path) = &options.screenshot {
@@ -785,41 +793,43 @@ fn draw_hud(
         );
     }
     draw_rectangle_lines(minimap.x, minimap.y, minimap.w, minimap.h, 1.0, accent);
-    for (index, text) in [
-        "Left drag: select",
-        "Right click: move",
-        "Ctrl+A: select all",
-        "S: stop selected",
-        "Wheel: zoom",
-        "Middle drag / arrows: pan",
-        "Space: pause",
-        "G: grid   F3: performance",
-    ]
-    .iter()
-    .enumerate()
-    {
+    if !matches!(scene.world, Simulation::Battle(_)) {
+        for (index, text) in [
+            "Left drag: select",
+            "Right click: move",
+            "Ctrl+A: select all",
+            "S: stop selected",
+            "Wheel: zoom",
+            "Middle drag / arrows: pan",
+            "Space: pause",
+            "G: grid   F3: performance",
+        ]
+        .iter()
+        .enumerate()
+        {
+            draw_text(
+                text,
+                left + 22.0,
+                340.0 + index as f32 * 25.0,
+                16.0,
+                Color::from_rgba(176, 188, 172, 255),
+            );
+        }
         draw_text(
-            text,
+            "ENGINE PREVIEW",
             left + 22.0,
-            340.0 + index as f32 * 25.0,
-            16.0,
-            Color::from_rgba(176, 188, 172, 255),
+            screen_height() - 90.0,
+            18.0,
+            accent,
+        );
+        draw_text(
+            "Full RA2/YR gameplay pending",
+            left + 22.0,
+            screen_height() - 64.0,
+            15.0,
+            Color::from_rgba(151, 163, 149, 255),
         );
     }
-    draw_text(
-        "ENGINE PREVIEW",
-        left + 22.0,
-        screen_height() - 90.0,
-        18.0,
-        accent,
-    );
-    draw_text(
-        "Full RA2/YR gameplay pending",
-        left + 22.0,
-        screen_height() - 64.0,
-        15.0,
-        Color::from_rgba(151, 163, 149, 255),
-    );
     draw_rectangle(
         0.0,
         screen_height() - 36.0,
@@ -857,7 +867,7 @@ fn draw_hud(
             format!("Result: {:?}", game.winner())
         } else {
             format!(
-                "Credits {} / power {} / B: build tank",
+                "Credits {} / power {} / B: queue available unit",
                 game.players().get(&0).map_or(0, |p| p.credits),
                 game.power_balance(0)
             )
