@@ -15,6 +15,10 @@ fn argument(name: &str, default: usize) -> usize {
 }
 
 fn main() {
+    if env::args().any(|arg| arg == "--asset-check") {
+        asset_check();
+        return;
+    }
     if let Some(path) =
         env::args().find_map(|arg| arg.strip_prefix("--replay-input=").map(str::to_owned))
     {
@@ -194,5 +198,41 @@ fn replay_check(count: usize, ticks: u64) {
         a.checkpoints.len(),
         a.world.state_hash(),
         started.elapsed().as_secs_f64() * 1000.0
+    );
+}
+
+fn asset_check() {
+    use ra2ne_assets::{ini::Ini, vfs::Vfs};
+    let mut source = String::from("[VehicleTypes]\n");
+    for id in 0..10_000 {
+        source.push_str(&format!("{id}=UNIT{id}\n"));
+    }
+    for id in 0..10_000 {
+        source.push_str(&format!("[UNIT{id}]\nStrength=100\nSpeed=5\nTracked=yes\n"));
+    }
+    let started = Instant::now();
+    let ini = Ini::parse(&source).unwrap();
+    assert!(ini.diagnostics.is_empty());
+    assert_eq!(ini.entries().len(), 40_000);
+    assert_eq!(ini.section_entries("VehicleTypes").count(), 10_000);
+    assert_eq!(ini.get("unit9999", "strength").unwrap().integer(), Ok(100));
+    let parse_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let mut vfs = Vfs::default();
+    vfs.mount(
+        "synthetic-base",
+        vec![("RulesMD.INI".into(), source.into_bytes())],
+    )
+    .unwrap();
+    vfs.mount(
+        "synthetic-mod",
+        vec![("rulesmd.ini".into(), b"[UNIT0]\nStrength=200\n".to_vec())],
+    )
+    .unwrap();
+    let file = vfs.get("RULESMD.INI").unwrap().unwrap();
+    assert_eq!(file.source, "synthetic-mod");
+    let overlay = Ini::parse(std::str::from_utf8(&file.bytes).unwrap()).unwrap();
+    assert_eq!(overlay.get("unit0", "strength").unwrap().integer(), Ok(200));
+    println!(
+        "asset_frontend_verified=true; synthetic_unit_types=10000; entries=40000; parse_ms={parse_ms:.3}"
     );
 }

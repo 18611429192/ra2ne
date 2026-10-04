@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 ra2ne-core = { path = "../../crates/ra2ne-core" }
+
+ra2ne-assets = { path = "../../crates/ra2ne-assets" }

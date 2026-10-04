@@ -17,7 +17,8 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 - tick-stamped command playback and checkpoint-based replay verification
 - bounded transport-independent multiplayer input barrier
 - versioned self-contained replay files with corruption checks and bounded decoding
-- no rendering, assets, or compatibility code yet
+- ordered INI syntax frontend with source diagnostics and layered in-memory virtual files
+- no rendering or original resource codecs yet
 
 ## Run
 
@@ -44,6 +45,18 @@ Replay format v1 is for the current abstract simulation. Its checksum detects
 corruption; it does not authenticate recordings. Changing simulation semantics
 requires a format-version change. Network transport and playable multiplayer
 are still pending.
+
+Synthetic asset frontend smoke check (no original assets required):
+
+```bash
+cargo run -p ra2ne-bench --release -- --asset-check
+```
+
+The INI frontend currently accepts UTF-8/ASCII, semicolon comments, repeated
+sections and last-value duplicate lookup. Registry entries retain source order.
+These are provisional frontend semantics pending original-game fixtures; parsed
+keys are not yet applied to unit/gameplay rules. VFS mounts replace whole files;
+INI rule merging across files is a separate future rules-loader operation.
 
 ## Project principles
 

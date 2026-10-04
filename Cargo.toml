@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/ra2ne-core",
+  "crates/ra2ne-assets",
   "apps/ra2ne-bench",
 ]
 

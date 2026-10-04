@@ -76,3 +76,27 @@ single-byte corruptions and all truncations of a fixture are rejected. 10,000
 units / 900 ticks: reference and decoded lockstep recording agree at 31
 checkpoints, hash 4c5d69f610b38d8a, total verification 358.935 ms. A separate
 process read the persisted file with the same hash. One-tick boundary passed.
+
+## 2026-10-04: compatibility frontend primitives
+
+Added separate ra2ne-assets crate. INI parsing retains ordered source entries,
+line numbers, unknown fields and duplicate-key diagnostics; lookup is ASCII
+case-insensitive and uses the last duplicate value. Syntax errors explicitly
+report invalid sections and entries. Values have optional checked integer,
+boolean and comma-list conversion. UTF-8/ASCII only; legacy codepages, quoted
+semicolon semantics, original-game duplicate behavior and schema validation
+need future compatibility fixtures. No gameplay keys are implemented yet.
+
+In-memory VFS layers use explicit caller-defined mount order and source labels.
+Names normalize ASCII case and separators; invalid/traversal names and collisions
+within a mount are rejected atomically. Later mounts replace entire files, not
+individual INI keys. Disk adapters, MIX lookup/decryption and codecs are pending.
+
+Verification: 27 workspace tests, Clippy and Release passed. --asset-check
+parses 10,000 synthetic unit types / 40,000 entries in 19.623 ms and checks mod
+file override and case-insensitive lookup. Bridge regression: 0.228 ms/Tick,
+hash c0c6b5571b31487c. Lockstep/file round-trip regression: 31 checkpoints,
+hash 4c5d69f610b38d8a, 359.082 ms total. Synthetic tests do not establish
+original RA2/YR map or ordinary MOD compatibility. Next: loose-file inspection,
+MIX archive frontend and authentic compatibility fixtures, alongside remaining
+navigation/transport/gameplay milestones. 1.0 remains incomplete.

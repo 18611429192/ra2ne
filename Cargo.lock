@@ -3,9 +3,14 @@
 version = 4
 
 [[package]]
+name = "ra2ne-assets"
+version = "0.1.0"
+
+[[package]]
 name = "ra2ne-bench"
 version = "0.1.0"
 dependencies = [
+ "ra2ne-assets",
  "ra2ne-core",
 ]
 
