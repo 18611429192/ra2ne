@@ -15,6 +15,10 @@ fn argument(name: &str, default: usize) -> usize {
 }
 
 fn main() {
+    if env::args().any(|arg| arg == "--rules-check") {
+        rules_check();
+        return;
+    }
     if env::args().any(|arg| arg == "--mix-check") {
         mix_check();
         return;
@@ -278,4 +282,31 @@ fn mix_check() {
         "mix_verified=true; entries={count}; parse_ms={parse_ms:.3}; lookup_ms={:.3}",
         started.elapsed().as_secs_f64() * 1000.0
     );
+}
+
+fn rules_check() {
+    use ra2ne_assets::rules::RuleSet;
+    let mut text = String::from("[VehicleTypes]\n");
+    for id in 0..10_000 {
+        text.push_str(&format!("{id}=UNIT{id}\n"));
+    }
+    for id in 0..10_000 {
+        text.push_str(&format!(
+            "[UNIT{id}]\nStrength=100\nSpeed=5\nCost=500\nPrimary=CANNON\n"
+        ));
+    }
+    text.push_str("[CANNON]\nDamage=20\nROF=10\nRange=5.5\n");
+    let started = Instant::now();
+    let mut rules = RuleSet::default();
+    rules.add_layer("synthetic rules.ini", &text).unwrap();
+    rules
+        .add_layer("synthetic map override", "[UNIT9999]\nStrength=200\n")
+        .unwrap();
+    let catalog = rules.load().unwrap();
+    let load_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(catalog.types.len(), 10_000);
+    assert_eq!(catalog.weapons.len(), 1);
+    assert!(catalog.diagnostics.is_empty());
+    assert_eq!(catalog.type_by_id("unit9999").unwrap().strength, 200);
+    println!("rules_verified=true; types=10000; weapons=1; load_ms={load_ms:.3}");
 }

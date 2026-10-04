@@ -52,3 +52,44 @@ whole files. Named loose-file enumeration excludes unnamed MIX entries. Disk
 imports reject symlinks and unsupported file types, have a caller byte budget,
 and publish only after successful validation of the whole mount. This adapter
 expects stable user-provided directories, not concurrently mutated hostile paths.
+
+## RA2/YR map packs and initial rules schema
+
+References:
+- [EA map loading](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditor/MapData.cpp)
+- [EA map pack wrapper](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditorPackLib/MissionEditorPackLib.cpp)
+- [EA binary structures](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/3rdParty/xcc/misc/cc_structures.h)
+- [EA compression implementations](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/3rdParty/xcc/misc/shp_decode.cpp)
+
+Numbered Base64 sections are concatenated by numeric index. Pack streams contain
+(u16 compressed length, u16 decompressed length, compressed bytes) blocks.
+IsoMapPack5 uses LZO1X. OverlayPack and OverlayDataPack use LCW/Format80;
+missing/short overlay arrays default-pad to 512x512 with 255 and zero,
+respectively, matching the map editor's array initialization. The frontend
+rejects malformed lengths, missing/duplicate pack indexes, bad back references,
+size overruns and decompressed-size mismatches. LCW here uses ordinary absolute
+long-copy offsets; other resource variants need their own explicit codec mode.
+
+Terrain records are eleven bytes: u16 X, u16 Y, signed i16 tile index, two
+reserved bytes, sub-tile byte, height byte, trailing reserved byte. Reserved
+bytes and duplicate cell records remain available rather than being silently
+rewritten. Waypoints encode Y*1000+X in file-coordinate space. Placed objects
+retain all comma-separated fields, with typed house, kind, type ID, health,
+file-coordinate cell, facing, mission and infantry subcell. Editor internal
+variable naming swaps these axes; the frontend retains file order.
+
+Size, LocalSize and Theater are checked. Parsing does not determine tile
+passability: that requires theater templates/terrain rules and movement classes.
+Trigger/team/script/terrain/lighting and related sections are retained with
+runtime-pending diagnostics. Missing terrain or malformed placed records fail
+explicitly. Authentic game and MOD fixture verification remains required.
+
+Rules support explicit source layers merged per section/key, keeping registry
+positions stable when existing keys are overridden. An index avoids rescanning
+the whole INI for every unit. Initial typed discovery handles four object
+registries, Strength, Speed, Cost, Sight, primary/secondary weapon references,
+owners, prerequisites, image/name/armor and basic weapon records. Decimals are
+parsed as exact thousandths, never host floating point. Unknown properties and
+unconsumed sections remain in the source with diagnostics. Defaults describe
+this incomplete discovery schema, not undocumented original-engine defaults;
+weapon/warhead/projectile/build/AI semantics are not implemented by this loader.

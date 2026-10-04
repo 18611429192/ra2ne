@@ -119,3 +119,22 @@ and decoded Chinese GBK INI. --mix-check: 10,000 entries parse 1.379 ms, all
 c0c6b5571b31487c. Replay/file/lockstep: 31 checkpoints, unchanged hash
 4c5d69f610b38d8a, verification 361.427 ms. Original assets, maps, rendering
 and gameplay remain required for 1.0 acceptance.
+
+## 2026-10-04: bounded maps and indexed rule overlays
+
+Added bounded numeric Base64 packs, LZO1X terrain and LCW overlays; map Size,
+LocalSize/Theater metadata, eleven-byte terrain cells, waypoints and placed
+vehicle/infantry/aircraft/building records. Complete INI and unconsumed object
+fields remain available. Pending trigger/team/script/lighting sections report
+diagnostics. Added per-key rule layers with source provenance, registry order,
+indexed property/type lookup, exact decimals and initial type/weapon discovery.
+Unknown MOD fields are preserved and reported. Inspector supports map and rules
+modes, map files inside MIX, and ordered --overlay= paths. This loads data;
+terrain passability and original gameplay semantics still need implementation.
+
+Verification: 44 workspace tests, Clippy and Release passed. Independent literal
+LZO map fixture was read by CLI. A map-style rule overlay modified type Strength
+and produced a source/line diagnostic for an unknown MOD flag. --rules-check:
+10,000 types with a shared weapon loaded in 89.069 ms, retaining registry order
+and the final type's overridden Strength. Source facts and limitations are
+recorded in FORMAT_NOTES.md. No original asset fixture was available here.

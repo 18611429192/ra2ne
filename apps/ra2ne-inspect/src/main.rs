@@ -1,6 +1,8 @@
 use ra2ne_assets::{
     ini::Ini,
+    map::Ra2Map,
     mix::{FilenameHash, MAX_ARCHIVE_BYTES, MixArchive},
+    rules::RuleSet,
     text::TextEncoding,
 };
 use std::{env, fs::File, io::Read, process::ExitCode, sync::Arc};
@@ -29,17 +31,45 @@ fn ini_report(bytes: &[u8], encoding: TextEncoding) -> Result<(), String> {
     }
     Ok(())
 }
+fn map_report(bytes: &[u8], encoding: TextEncoding) -> Result<(), String> {
+    let text = encoding.decode(bytes)?;
+    let map = Ra2Map::parse(&text)?;
+    println!(
+        "map_name={}; theater={}; size={}x{}; terrain_cells={}; objects={}; waypoints={}; diagnostics={}",
+        map.name,
+        map.theater,
+        map.size.width,
+        map.size.height,
+        map.tiles.len(),
+        map.objects.len(),
+        map.waypoints.len(),
+        map.diagnostics.len()
+    );
+    for d in map.diagnostics.iter().take(100) {
+        println!(
+            "section={}; line={}; diagnostic={}",
+            d.section, d.line, d.message
+        );
+    }
+    if map.diagnostics.len() > 100 {
+        println!("additional_diagnostics={}", map.diagnostics.len() - 100);
+    }
+    Ok(())
+}
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.len() < 2 {
-        return Err("usage: ra2ne-inspect ini|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk]".into());
+        return Err("usage: ra2ne-inspect ini|map|rules|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk] [--overlay=PATH]".into());
     }
     let mut file_name = None;
     let mut nested = None;
     let mut hash = FilenameHash::Ra2;
     let mut encoding = TextEncoding::Utf8;
+    let mut overlays = Vec::new();
     for arg in &args[2..] {
-        if let Some(value) = arg.strip_prefix("--file=") {
+        if let Some(value) = arg.strip_prefix("--overlay=") {
+            overlays.push(value);
+        } else if let Some(value) = arg.strip_prefix("--file=") {
             file_name = Some(value);
         } else if let Some(value) = arg.strip_prefix("--nested=") {
             nested = Some(value);
@@ -55,7 +85,43 @@ fn run() -> Result<(), String> {
             return Err(format!("unknown option: {arg}"));
         }
     }
+    if !overlays.is_empty() && args[0] != "rules" {
+        return Err("overlay options require rules mode".into());
+    }
     match args[0].as_str() {
+        "map" => {
+            if file_name.is_some() || nested.is_some() {
+                return Err("file/nested options require mix mode".into());
+            }
+            map_report(&read_bounded(&args[1], 16 * 1024 * 1024)?, encoding)?;
+        }
+        "rules" => {
+            if file_name.is_some() || nested.is_some() {
+                return Err("file/nested options require mix mode".into());
+            }
+            let mut rules = RuleSet::default();
+            for path in std::iter::once(args[1].as_str()).chain(overlays) {
+                let bytes = read_bounded(path, 16 * 1024 * 1024)?;
+                let text = encoding.decode(&bytes)?;
+                rules.add_layer(path, &text)?;
+            }
+            let catalog = rules.load()?;
+            println!(
+                "rule_types={}; weapons={}; diagnostics={}",
+                catalog.types.len(),
+                catalog.weapons.len(),
+                catalog.diagnostics.len()
+            );
+            for d in catalog.diagnostics.iter().take(100) {
+                println!(
+                    "source={}; line={}; section={}; key={}; diagnostic={}",
+                    d.source, d.line, d.section, d.key, d.message
+                );
+            }
+            if catalog.diagnostics.len() > 100 {
+                println!("additional_diagnostics={}", catalog.diagnostics.len() - 100);
+            }
+        }
         "ini" => {
             if file_name.is_some() || nested.is_some() {
                 return Err("file/nested options require mix mode".into());
@@ -87,9 +153,10 @@ fn run() -> Result<(), String> {
                     .get(name, hash)?
                     .ok_or_else(|| format!("MIX file not found: {name}"))?;
                 println!("resolved_name={name}; bytes={}", bytes.len());
-                if name.to_ascii_lowercase().ends_with(".ini")
-                    || name.to_ascii_lowercase().ends_with(".map")
-                {
+                let extension = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+                if ["map", "mpr", "yrm"].contains(&extension.as_str()) {
+                    map_report(bytes, encoding)?;
+                } else if extension == "ini" {
                     ini_report(bytes, encoding)?;
                 }
             } else {
@@ -98,7 +165,7 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        _ => return Err("mode must be ini or mix".into()),
+        _ => return Err("mode must be ini, map, rules or mix".into()),
     }
     Ok(())
 }

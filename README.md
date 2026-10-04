@@ -20,6 +20,7 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 - ordered INI syntax frontend with source diagnostics and layered in-memory virtual files
 - MIX directory reading, encrypted headers, checksums, archive/loose overlays
 - explicit UTF-8, Windows-1252 and GBK resource text decoding
+- bounded map packs, placed object records and indexed INI rule overlays
 - no rendering or complete original resource codecs yet
 
 ## Run
@@ -72,6 +73,17 @@ cargo run -p ra2ne-bench --release -- --mix-check
 Nested names depend on the actual archive. No archive extraction is needed for
 inspection. [Format notes](docs/FORMAT_NOTES.md) record supported variants and
 remaining compatibility work.
+
+Read map records and merge rule overrides:
+
+```bash
+cargo run -p ra2ne-inspect --release -- map /path/to/map.mpr
+cargo run -p ra2ne-inspect --release -- rules /path/to/rulesmd.ini --overlay=/path/to/map.mpr
+cargo run -p ra2ne-bench --release -- --rules-check
+```
+
+Map/INI inspection reports pending runtime features. It does not launch a game
+or certify that original maps and MODs already run correctly.
 
 ## Project principles
 
