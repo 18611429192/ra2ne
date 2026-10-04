@@ -3,8 +3,10 @@ resolver = "2"
 members = [
   "crates/ra2ne-core",
   "crates/ra2ne-assets",
+  "crates/ra2ne-game",
   "apps/ra2ne-bench",
   "apps/ra2ne-inspect",
+  "apps/ra2ne-runtime",
 ]
 
 [workspace.package]

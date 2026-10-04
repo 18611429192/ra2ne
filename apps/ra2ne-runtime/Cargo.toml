@@ -1,0 +1,10 @@
+[package]
+name = "ra2ne-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ra2ne-core = { path = "../../crates/ra2ne-core" }
+ra2ne-assets = { path = "../../crates/ra2ne-assets" }
+macroquad = { version = "0.4.16", default-features = false }

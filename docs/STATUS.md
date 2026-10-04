@@ -138,3 +138,28 @@ and produced a source/line diagnostic for an unknown MOD flag. --rules-check:
 10,000 types with a shared weapon loaded in 89.069 ms, retaining registry order
 and the final type's overridden Strength. Source facts and limitations are
 recorded in FORMAT_NOTES.md. No original asset fixture was available here.
+
+## Interactive and game-system foundation (not 1.0 acceptance)
+
+- `ra2ne-runtime`: fixed 30-Tick simulation with an isometric interactive renderer,
+  selection, group movement, pause, camera pan/zoom, minimap and diagnostics.
+  Map inputs remain a data viewer: original terrain passability and gameplay are
+  not inferred from tile identifiers. Headless mode runs without a window.
+- SHP TS raw/RLE indexed frame and six-bit PAL decoding, plus TMP TS diamond
+  tile/extra/Z-plane decoding. Malformed offsets and output sizes are bounded.
+  This does not yet implement original animation, voxel rendering or shadows.
+- `ra2ne-game`: generation-checked entity handles, atomic owner-validated commands,
+  spatial combat queries, simultaneous damage, production queues, credit
+  reservations/refunds, power pause, blocked exits and winner detection.
+  Definitions currently use explicit engine timings; the original rules adapter,
+  harvesting, defeat/draw policy, attack pursuit and full game saves are pending.
+  The interactive application still exercises movement rather than this complete
+  game layer. Initial population has a bulk API to avoid repeated spatial rebuilds.
+- Workspace tests and strict Clippy pass. Two headless runs with 10,000 units and
+  900 Ticks produced the same hash `7497f64dc6800336`.
+- A native window could not be visually validated in this environment because
+  AF_UNIX sockets needed by the virtual display are denied. Compilation and
+  headless tests do not count as graphical acceptance.
+
+Original assets/maps/mods, complete skirmish, actual network transport and full
+save/replay integration remain required before a 1.0 release.

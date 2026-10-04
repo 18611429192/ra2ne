@@ -1,0 +1,8 @@
+[package]
+name = "ra2ne-game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ra2ne-core = { path = "../ra2ne-core" }

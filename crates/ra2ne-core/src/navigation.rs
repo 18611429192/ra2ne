@@ -23,6 +23,24 @@ impl NavigationMap {
         }
     }
 
+    pub fn state_hash(&self) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for value in [self.width as u64, self.height as u64].into_iter().chain(
+            self.walkable
+                .iter()
+                .zip(&self.capacity)
+                .flat_map(|(&w, &c)| {
+                    [
+                        u64::from(w),
+                        if c == usize::MAX { u64::MAX } else { c as u64 },
+                    ]
+                }),
+        ) {
+            hash ^= value;
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
+        hash
+    }
     pub(crate) fn snapshot(&self) -> (usize, usize, impl Iterator<Item = (bool, usize)> + '_) {
         (
             self.width,

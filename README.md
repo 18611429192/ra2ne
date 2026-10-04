@@ -94,3 +94,15 @@ or certify that original maps and MODs already run correctly.
 5. Core hot paths must not default to O(N²).
 
 See [development status](docs/STATUS.md) for verified progress and remaining 1.0 scope.
+
+Interactive movement foundation (requires a graphical desktop):
+
+```sh
+cargo run --release -p ra2ne-runtime -- --units=512
+cargo run --release -p ra2ne-runtime -- --units=10000 --autoplay --headless-ticks=900
+cargo run --release -p ra2ne-runtime -- --map=example.mpr
+cargo run --release -p ra2ne-runtime -- --sprite=example.shp --palette=example.pal
+```
+
+The map option currently opens a data viewer. Full original skirmish is not yet
+implemented; see `docs/STATUS.md` for the remaining 1.0 acceptance work.

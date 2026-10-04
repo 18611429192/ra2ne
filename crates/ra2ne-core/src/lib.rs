@@ -103,11 +103,25 @@ impl SpatialGrid {
         }
     }
     pub fn candidates_near(&self, position: Vec2, radius: i32) -> Vec<usize> {
-        let min_x = (position.x - radius).div_euclid(self.cell_size);
-        let max_x = (position.x + radius).div_euclid(self.cell_size);
-        let min_y = (position.y - radius).div_euclid(self.cell_size);
-        let max_y = (position.y + radius).div_euclid(self.cell_size);
+        if radius < 0 {
+            return Vec::new();
+        }
+        let min_x = position.x.saturating_sub(radius).div_euclid(self.cell_size);
+        let max_x = position.x.saturating_add(radius).div_euclid(self.cell_size);
+        let min_y = position.y.saturating_sub(radius).div_euclid(self.cell_size);
+        let max_y = position.y.saturating_add(radius).div_euclid(self.cell_size);
         let mut ids = Vec::new();
+        let area = (i64::from(max_x) - i64::from(min_x) + 1)
+            .saturating_mul(i64::from(max_y) - i64::from(min_y) + 1);
+        if area > self.cells.len() as i64 * 4 {
+            for (&(x, y), cell) in &self.cells {
+                if (min_x..=max_x).contains(&x) && (min_y..=max_y).contains(&y) {
+                    ids.extend(cell);
+                }
+            }
+            ids.sort_unstable();
+            return ids;
+        }
         for x in min_x..=max_x {
             for y in min_y..=max_y {
                 if let Some(cell) = self.cells.get(&(x, y)) {
@@ -195,6 +209,52 @@ impl World {
                 route: Arc::clone(&route),
                 state,
             });
+        }
+        Ok(())
+    }
+    /// Append validated units with stable monotonically allocated slots.
+    pub fn spawn_units(&mut self, units: &[Unit]) -> Result<std::ops::Range<usize>, &'static str> {
+        if units.iter().any(|u| u.speed < 0) {
+            return Err("negative unit speed");
+        }
+        let start = self.units.len();
+        self.units.extend_from_slice(units);
+        self.orders.extend((0..units.len()).map(|_| None));
+        self.spatial.rebuild(&self.units);
+        Ok(start..self.units.len())
+    }
+    /// Replace an existing slot and clear its old movement order. Entity
+    /// generation/ownership checks belong to the game layer using this slot.
+    pub fn replace_unit(&mut self, id: usize, unit: Unit) -> Result<(), &'static str> {
+        if id >= self.units.len() || unit.speed < 0 {
+            return Err("invalid replacement unit");
+        }
+        self.units[id] = unit;
+        self.orders[id] = None;
+        self.spatial.rebuild(&self.units);
+        Ok(())
+    }
+    /// Broad-phase tuning is not simulation state; callers must apply exact
+    /// distance tests so bucket size cannot change gameplay outcomes.
+    pub fn set_spatial_cell_size(&mut self, size: i32) -> Result<(), &'static str> {
+        if size <= 0 {
+            return Err("spatial cell size must be positive");
+        }
+        self.spatial = SpatialGrid::new(size);
+        self.spatial.rebuild(&self.units);
+        Ok(())
+    }
+    pub fn nearby_candidates(&self, position: Vec2, radius: i32) -> Vec<usize> {
+        self.spatial.candidates_near(position, radius)
+    }
+    /// Stop a complete selection atomically without changing other orders.
+    pub fn stop_group(&mut self, ids: &[usize]) -> Result<(), &'static str> {
+        if ids.iter().any(|&id| id >= self.units.len()) {
+            return Err("invalid unit id");
+        }
+        for &id in ids {
+            self.units[id].goal = self.units[id].position;
+            self.orders[id] = None;
         }
         Ok(())
     }
@@ -462,5 +522,26 @@ mod tests {
         assert_eq!(unit.position, unit.goal);
         unit.move_towards_goal();
         assert_eq!(unit.position, unit.goal);
+    }
+    #[test]
+    fn stop_selection_is_atomic_and_leaves_other_orders_running() {
+        let mut world = World::from_units(vec![
+            Unit {
+                position: Vec2::new(0, 0),
+                goal: Vec2::new(0, 0),
+                speed: 1
+            };
+            2
+        ]);
+        let map = NavigationMap::new(5, 1);
+        world.move_group(&[0, 1], &map, Vec2::new(4, 0)).unwrap();
+        world.tick();
+        let hash = world.state_hash();
+        assert!(world.stop_group(&[0, 2]).is_err());
+        assert_eq!(world.state_hash(), hash);
+        world.stop_group(&[0]).unwrap();
+        world.tick();
+        assert_eq!(world.unit(0).unwrap().position, Vec2::new(1, 0));
+        assert_eq!(world.unit(1).unwrap().position, Vec2::new(2, 0));
     }
 }
