@@ -97,9 +97,12 @@ weapon/warhead/projectile/build/AI semantics are not implemented by this loader.
 
 ## Engine state and game transport formats
 
-The new version-1 little-endian engine formats are independent of original game
+The little-endian engine formats are independent of original game
 save/replay protocols: `RA2NEMV1` (movement), `RA2NEMP1` (navigation map),
-`RA2NEGS1` (full game save), `RA2NEGR1` (full replay) and `RA2NEGF1` (input frame).
+`RA2NEGS2` (full game save), `RA2NEGR2` (full replay) and `RA2NEGF1` (input frame).
+TCP handshake is `RA2NETP2`. Full-game v1 files and v1 peers are rejected after
+adding armor/Verses to combat semantics, hashes and definitions; no migration is
+provided. Movement/map/frame formats retain their v1 layouts.
 Saves preserve shared route identities, and reconstruct/revalidate BFS topology
 before accepting a movement state. Hashes detect corruption, not malicious
 cryptographic forgery. Event buffers and spatial caches are transient.
@@ -111,3 +114,15 @@ at most 1,024 handles and an accepted frame contains at most 4,096 selected hand
 Lockstep accepts at most 120 future Ticks. TCP adds a four-byte message length,
 a versioned session handshake, at most 128 queued messages and bounded I/O per
 poll. Session membership does not provide encrypted transport or matchmaking.
+
+## Standard armor and direct warhead damage
+
+The [Ares developer documentation](https://ares-developers.github.io/Ares-docs/new/additionalarmortypesandverses.html)
+documents the eleven standard armor names/order and original Verses special
+values. The experimental adapter implements their direct damage multipliers,
+0% target rejection and 1%/2% passive-acquisition exclusions. This reference
+does not establish exact original damage rounding: the engine currently uses
+integer floor without a minimum-damage adjustment. Retaliation, splash, armor
+extensions and immunity flags remain pending. Values require exactly eleven
+percentage entries with at most three fractional digits and nonnegative u32
+fixed-point magnitude. Unknown/custom armor and missing referenced Verses fail.

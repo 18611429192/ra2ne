@@ -87,11 +87,13 @@ fn handles(game: &Skirmish, ids: &[usize]) -> Result<Vec<EntityId>, &'static str
 }
 pub fn synthetic(map: NavigationMap, count: usize) -> Result<Skirmish, &'static str> {
     let tank = UnitDef {
+        armor: ra2ne_game::Armor::None,
         name: "Tank".into(),
         health: 100,
         speed: 1,
         cost: 100,
         weapon: Some(Weapon {
+            verses: ra2ne_game::Verses::default(),
             damage: 10,
             range: 4,
             reload_ticks: 15,

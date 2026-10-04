@@ -241,3 +241,36 @@ No graphical acceptance or original-asset compatibility claim is added by this
 batch. 1.0 remains incomplete: original movement/terrain semantics, armor and
 projectiles, full production/construction, audio, AI, multiplayer UI and real
 map/MOD acceptance fixtures still need work.
+
+## 2026-10-04: standard armor and direct warhead Verses
+
+Implemented eleven standard armor slots and exact percentage parsing. Layered
+warhead Verses now scales direct shot damage by target armor. Explicit attacks
+on zero-multiplier armor fail atomically; automatic selection skips 0%, 1% and
+2% armor matches. Other percentages, including fractional values, use their
+actual multiplier. No retaliation logic or original splash/projectile/immunity
+semantics are claimed. Damage currently floors fixed-point products, with u32
+saturation and no minimum-damage adjustment; original rounding is unverified.
+Missing referenced Verses, malformed counts/precision and custom armor fail.
+
+Definitions, state hashes and saves include armor and all eleven multipliers.
+Game save/replay and TCP handshake versions advance to v2; v1 full-game artifacts
+and peers are rejected. Movement/map checkpoints and frame codecs remain v1.
+
+Verification on Rust 1.99.0 / Linux:
+- 73 workspace tests pass, strict Clippy and formatting pass; Release builds pass.
+- Tests cover slots/percentages/overflow, immune-nearest-target skipping,
+  atomic immune attack rejection, 1%/2% passive acquisition exclusions, actual
+  scaled damage, warhead overlays, hash sensitivity, v1 save/peer rejection,
+  and nonuniform-armor save/replay round trips.
+- Two 512-unit experimental runs finish 900 active Ticks with hash
+  `b1b622812c3d5cd7`; saving at 450 and restoring for 450 matches exactly.
+- TCP/replay: two independent 2,000-unit peers, 900 Ticks, 148,041-byte replay,
+  hash `5645243b40d0dbe8`.
+- Sustained 10,000-unit combat: 900 Ticks, 31 matching checkpoints,
+  hash `fe3ce38bf6d1d62b`; 2.328 ms/Tick on this machine while other regression
+  processes ran. This is a synthetic measurement, not an original-game comparison.
+
+Hash changes reflect the expanded rule definitions. No new graphical or
+original-resource acceptance was performed. See RULE_EXPERIMENT.md and
+FORMAT_NOTES.md for supported semantics and sources. 1.0 remains incomplete.

@@ -15,7 +15,7 @@ fn read_id(r: &mut Reader<'_>) -> Result<EntityId, &'static str> {
 impl Skirmish {
     pub fn save(&self) -> Result<Vec<u8>, &'static str> {
         let mut w = Writer::new();
-        w.0.extend_from_slice(b"RA2NEGS1");
+        w.0.extend_from_slice(b"RA2NEGS2");
         w.u64(self.tick);
         w.boolean(self.started_with_opponents);
         w.boolean(self.finished);
@@ -26,6 +26,7 @@ impl Skirmish {
         w.u64(self.rules.max_entities as u64);
         w.u64(self.rules.units.len() as u64);
         for def in &self.rules.units {
+            w.u32(def.armor as u32);
             w.bytes(def.name.as_bytes());
             w.u32(def.health);
             w.i32(def.speed);
@@ -36,6 +37,9 @@ impl Skirmish {
             w.boolean(def.harvester);
             w.boolean(def.weapon.is_some());
             if let Some(weapon) = &def.weapon {
+                for value in weapon.verses.0 {
+                    w.u32(value);
+                }
                 w.u32(weapon.damage);
                 w.u32(weapon.range);
                 w.u32(weapon.reload_ticks);
@@ -97,7 +101,7 @@ impl Skirmish {
     }
     pub fn load(bytes: &[u8]) -> Result<Self, &'static str> {
         let mut r = Reader::new(bytes)?;
-        if r.take(8)? != b"RA2NEGS1" {
+        if r.take(8)? != b"RA2NEGS2" {
             return Err("unsupported game save");
         }
         let tick = r.u64()?;
@@ -108,6 +112,7 @@ impl Skirmish {
         let definitions = r.count(100_000)?;
         let mut units = Vec::with_capacity(definitions);
         for _ in 0..definitions {
+            let armor = Armor::from_index(r.u32()?)?;
             let name = std::str::from_utf8(r.bytes(4096)?)
                 .map_err(|_| "invalid save rule name")?
                 .to_owned();
@@ -119,7 +124,12 @@ impl Skirmish {
             let factory = r.boolean()?;
             let harvester = r.boolean()?;
             let weapon = if r.boolean()? {
+                let mut values = [0; 11];
+                for value in &mut values {
+                    *value = r.u32()?;
+                }
                 Some(Weapon {
+                    verses: Verses(values),
                     damage: r.u32()?,
                     range: r.u32()?,
                     reload_ticks: r.u32()?,
@@ -128,6 +138,7 @@ impl Skirmish {
                 None
             };
             units.push(UnitDef {
+                armor,
                 name,
                 health,
                 speed,

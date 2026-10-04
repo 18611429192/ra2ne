@@ -1,7 +1,7 @@
 //! Explicit experimental bridge from layered INI data to engine definitions.
 //! Conversion requires caller supplied timing/movement calibration. It does not
 //! establish original-game semantics; every omitted behavior is reported.
-use crate::{Rules, UnitDef, Weapon};
+use crate::{Armor, Rules, UnitDef, Verses, Weapon};
 use ra2ne_assets::rules::{RuleSet, TypeKind};
 use std::collections::BTreeMap;
 
@@ -30,14 +30,28 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
         return Err("rule import requires positive explicit timing calibration".into());
     }
     let catalog = rules.load()?;
+    let mut warheads = BTreeMap::new();
+    for weapon in catalog.weapons.values() {
+        if let Some(id) = &weapon.warhead {
+            let value = rules
+                .get(id, "Verses")
+                .ok_or_else(|| format!("[{id}]: referenced Warhead requires explicit Verses"))?;
+            let verses = Verses::parse(&value.entry.value).map_err(|e| {
+                format!("{}:{}: [{id}] Verses: {e}", value.source, value.entry.line)
+            })?;
+            warheads.insert(id.to_ascii_lowercase(), verses);
+        }
+    }
     let mut diagnostics: Vec<_> = catalog
         .diagnostics
         .iter()
         .filter(|d| {
-            !(catalog.type_by_id(&d.section).is_some()
-                && ["Power", "Harvester"]
-                    .iter()
-                    .any(|k| k.eq_ignore_ascii_case(&d.key)))
+            !(warheads.contains_key(&d.section.to_ascii_lowercase())
+                && d.key.eq_ignore_ascii_case("Verses")
+                || catalog.type_by_id(&d.section).is_some()
+                    && ["Power", "Harvester"]
+                        .iter()
+                        .any(|k| k.eq_ignore_ascii_case(&d.key)))
         })
         .map(|d| {
             format!(
@@ -65,30 +79,50 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
         };
         let cost = u32::try_from(unit.cost)
             .map_err(|_| format!("[{}]: negative Cost cannot be imported", unit.id))?;
-        let weapon = unit.primary.as_ref().map(|id| -> Result<Weapon, String> {
-            let source = catalog.weapons.get(&id.to_ascii_lowercase())
-                .ok_or_else(|| format!("[{id}]: missing primary weapon"))?;
-            let damage = u32::try_from(source.damage)
-                .map_err(|_| format!("[{id}]: healing weapons are unsupported"))?;
-            // Range is in thousandths of a cell; engine range is whole cells.
-            // Reject fractional values instead of silently changing combat reach.
-            if source.range.0 <= 0 || source.range.0 % 1000 != 0 {
-                return Err(format!("[{id}]: Range must be positive whole cells for this engine"));
-            }
-            let range = u32::try_from(source.range.0 / 1000)
-                .map_err(|_| format!("[{id}]: Range overflow"))?;
-            let reload_ticks = u64::from(source.rof) * u64::from(policy.rof_numerator);
-            let reload_ticks = reload_ticks.div_ceil(u64::from(policy.rof_denominator)).max(1);
-            let reload_ticks = u32::try_from(reload_ticks)
-                .map_err(|_| format!("[{id}]: calibrated ROF overflow"))?;
-            if source.warhead.is_some() || source.projectile.is_some() {
-                diagnostics.push(format!("[{id}]: Warhead/Projectile behavior is not applied; direct uniform damage only"));
-            }
-            Ok(Weapon { damage, range, reload_ticks })
-        }).transpose()?;
+        let weapon = unit
+            .primary
+            .as_ref()
+            .map(|id| -> Result<Weapon, String> {
+                let source = catalog
+                    .weapons
+                    .get(&id.to_ascii_lowercase())
+                    .ok_or_else(|| format!("[{id}]: missing primary weapon"))?;
+                let damage = u32::try_from(source.damage)
+                    .map_err(|_| format!("[{id}]: healing weapons are unsupported"))?;
+                // Range is in thousandths of a cell; engine range is whole cells.
+                // Reject fractional values instead of silently changing combat reach.
+                if source.range.0 <= 0 || source.range.0 % 1000 != 0 {
+                    return Err(format!(
+                        "[{id}]: Range must be positive whole cells for this engine"
+                    ));
+                }
+                let range = u32::try_from(source.range.0 / 1000)
+                    .map_err(|_| format!("[{id}]: Range overflow"))?;
+                let reload_ticks = u64::from(source.rof) * u64::from(policy.rof_numerator);
+                let reload_ticks = reload_ticks
+                    .div_ceil(u64::from(policy.rof_denominator))
+                    .max(1);
+                let reload_ticks = u32::try_from(reload_ticks)
+                    .map_err(|_| format!("[{id}]: calibrated ROF overflow"))?;
+                if source.projectile.is_some() {
+                    diagnostics.push(format!(
+                        "[{id}]: Projectile behavior is not applied; immediate direct damage only"
+                    ));
+                }
+                let verses = source
+                    .warhead
+                    .as_ref()
+                    .map_or(Verses::default(), |id| warheads[&id.to_ascii_lowercase()]);
+                Ok(Weapon {
+                    verses,
+                    damage,
+                    range,
+                    reload_ticks,
+                })
+            })
+            .transpose()?;
         for (key, present) in [
             ("Secondary", unit.secondary.is_some()),
-            ("Armor", unit.armor.is_some()),
             ("Prerequisite", !unit.prerequisites.is_empty()),
             ("Owner", !unit.owners.is_empty()),
             ("Sight", unit.sight.0 != 0),
@@ -135,7 +169,13 @@ pub fn import(rules: &RuleSet, policy: &ImportPolicy) -> Result<ImportedRules, S
             ));
         }
         type_indices.insert(unit.id.to_ascii_lowercase(), units.len());
+        let armor = unit
+            .armor
+            .as_ref()
+            .map_or(Ok(Armor::None), |s| Armor::parse(s))
+            .map_err(|e| format!("[{}]: Armor: {e}", unit.id))?;
         units.push(UnitDef {
+            armor,
             name: unit.id.clone(),
             health: unit.strength,
             speed,
@@ -173,7 +213,7 @@ mod tests {
     }
     fn fixture() -> RuleSet {
         let mut r = RuleSet::default();
-        r.add_layer("rules.ini", "[VehicleTypes]\n0=TANK\n[TANK]\nStrength=100\nSpeed=5\nCost=500\nPrimary=GUN\nArmor=heavy\n[GUN]\nDamage=20\nROF=10\nRange=5\nWarhead=AP\n").unwrap();
+        r.add_layer("rules.ini", "[VehicleTypes]\n0=TANK\n[TANK]\nStrength=100\nSpeed=5\nCost=500\nPrimary=GUN\nArmor=heavy\n[GUN]\nDamage=20\nROF=10\nRange=5\nWarhead=AP\n[AP]\nVerses=100%,100%,100%,100%,100%,50%,100%,100%,100%,100%,100%\n").unwrap();
         r
     }
     #[test]
@@ -186,8 +226,29 @@ mod tests {
         assert_eq!((tank.health, tank.cost, tank.speed), (250, 700, 1));
         let gun = tank.weapon.as_ref().unwrap();
         assert_eq!((gun.damage, gun.range, gun.reload_ticks), (20, 5, 7));
-        assert!(result.diagnostics.iter().any(|s| s.contains("Armor")));
-        assert!(result.diagnostics.iter().any(|s| s.contains("Warhead")));
+        assert_eq!(tank.armor, Armor::Heavy);
+        assert_eq!(gun.verses.damage(20, tank.armor), 10);
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|s| s.contains("Verses: property preserved"))
+        );
+        r.add_layer(
+            "warhead-mod.ini",
+            "[AP]\nVerses=100%,100%,100%,100%,100%,150%,100%,100%,100%,100%,100%\n",
+        )
+        .unwrap();
+        let modified = import(&r, &policy()).unwrap();
+        assert_eq!(
+            modified.rules.units[0]
+                .weapon
+                .as_ref()
+                .unwrap()
+                .verses
+                .damage(20, Armor::Heavy),
+            30
+        );
     }
     #[test]
     fn unsupported_values_fail_without_silent_rounding_or_clamping() {
@@ -197,6 +258,9 @@ mod tests {
             "[TANK]\nSpeed=20\n",
             "[TANK]\nCost=-1\n",
             "[GUN]\nRange=1025\n",
+            "[GUN]\nWarhead=MISSING\n",
+            "[AP]\nVerses=100%\n",
+            "[TANK]\nArmor=custom\n",
         ] {
             let mut r = fixture();
             r.add_layer("mod.ini", text).unwrap();
@@ -237,8 +301,13 @@ mod tests {
             .populate(&[(0, 0, Vec2::new(1, 1)), (1, 0, Vec2::new(3, 1))])
             .unwrap();
         game.attack(0, &[ids[0]], ids[1]).unwrap();
+        let replay = crate::commands::GameReplay {
+            initial: game.save().unwrap(),
+            ticks: 51,
+            commands: vec![],
+        };
         game.tick();
-        assert_eq!(game.actor(ids[1]).unwrap().health, 80);
+        assert_eq!(game.actor(ids[1]).unwrap().health, 90);
         let mut restored = Skirmish::load(&game.save().unwrap()).unwrap();
         for _ in 0..50 {
             game.tick();
@@ -246,5 +315,10 @@ mod tests {
             assert_eq!(game.state_hash(), restored.state_hash());
             assert_eq!(game.events(), restored.events());
         }
+        let decoded = crate::commands::GameReplay::decode(&replay.encode().unwrap()).unwrap();
+        assert_eq!(
+            decoded.play(5).unwrap().game.state_hash(),
+            game.state_hash()
+        );
     }
 }

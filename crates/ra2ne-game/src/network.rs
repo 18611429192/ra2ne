@@ -50,7 +50,7 @@ impl Peer {
             outgoing: VecDeque::new(),
             written: 0,
         };
-        let mut hello = b"RA2NETP1".to_vec();
+        let mut hello = b"RA2NETP2".to_vec();
         hello.extend_from_slice(&session.token);
         hello.extend_from_slice(&local_player.to_le_bytes());
         hello.extend_from_slice(&session.tick.to_le_bytes());
@@ -146,7 +146,7 @@ impl Peer {
                 let message = &self.incoming[4..size + 4];
                 if !self.ready {
                     if message.len() != 44
-                        || &message[..8] != b"RA2NETP1"
+                        || &message[..8] != b"RA2NETP2"
                         || message[8..24] != self.session.token
                         || u32::from_le_bytes(message[24..28].try_into().unwrap())
                             != self.remote_player
@@ -283,6 +283,32 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn old_protocol_handshake_is_rejected() {
+        let session = Session {
+            token: [11; 16],
+            initial_hash: 1,
+            tick: 0,
+        };
+        let (mut left, mut right) = peers(session, session);
+        let mut packet = right.outgoing.front().unwrap().clone();
+        packet[4..12].copy_from_slice(b"RA2NETP1");
+        right.stream.write_all(&packet).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match left.poll() {
+                Err(error) => {
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                    break;
+                }
+                Ok(_) => {
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        }
+        assert!(!left.ready());
     }
     #[test]
     fn mismatched_initial_state_is_rejected_before_inputs() {

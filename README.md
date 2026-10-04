@@ -27,6 +27,7 @@ Implemented foundations include:
 - synthetic combat, economy, production, engine saves and full-game replays
 - bounded TCP lockstep transport and independent peer verification
 - experimental layered INI definitions driving a playable test scenario
+- standard armor and warhead Verses applied to damage and target acquisition
 
 ## Run
 

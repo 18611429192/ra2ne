@@ -30,8 +30,10 @@ order remains stable, and type IDs match without ASCII case sensitivity.
 | BuildingTypes | Stationary definitions; no original construction/footprint behavior |
 | AircraftTypes | Import fails; air movement is unavailable |
 | Factory | Preserved with diagnostic; production disabled to avoid ignoring categories |
-| Secondary, Armor, Prerequisite, Owner, Sight | Preserved with explicit omitted-behavior diagnostics |
-| Warhead, Projectile | Direct uniform damage only, explicit diagnostic |
+| Armor | Eleven standard armor slots; unknown/custom armor rejected |
+| Warhead Verses | Exactly eleven percentages; exact thousandths of a percent; target armor scales direct damage |
+| Secondary, Prerequisite, Owner, Sight | Preserved with explicit omitted-behavior diagnostics |
+| Projectile and other warhead properties | Immediate direct hits; other properties retained with diagnostics |
 | Other properties | Retained by asset frontend, source/line diagnostics |
 
 Build duration must be supplied explicitly with `--rule-build-ticks=N`; it is
@@ -42,7 +44,25 @@ invalid values, invent missing weapon definitions, or silently round ranges.
 The game library exposes `rule_import::import` independently of the runtime.
 The returned diagnostics must be shown to users before using experimental rules.
 Runtime prints all diagnostics to stderr; the graphical scene keeps the first
-100. Armor multipliers, projectiles, secondary selection, prerequisites, faction
+100. Projectiles, secondary selection, prerequisites, faction
 ownership, terrain movement classes and original production remain necessary
 for ordinary original-game and MOD compatibility. Importing data is not proof
 that those behaviors are compatible.
+
+Armor slot order is `none, flak, plate, light, medium, heavy, wood, steel,
+concrete, special_1, special_2`. A referenced warhead must provide `Verses`;
+missing definitions fail. Weapons without a warhead retain the synthetic 100%
+multiplier. INI overlays also replace warhead Verses. Custom ArmorTypes and
+Versus.* behavior are not implemented.
+
+Direct damage uses `floor(Damage * multiplier / 100000)` and saturates at
+`u32::MAX`; 100% is encoded as 100000. Zero multiplier disallows explicit attack
+and automatic selection. Exact 1% and 2% values permit explicit attacks but
+disable automatic acquisition. Retaliation is not implemented. Original damage
+rounding, minimum damage, splash/falloff and immunity flags remain unverified or
+unsupported; this is not complete original warhead behavior.
+
+Full-game saves/replays and TCP handshakes are now v2. v1 full-game artifacts
+and peers are rejected; there is no migration adapter. Movement/map checkpoints
+and input-frame encoding remain v1. Imported armor and every multiplier are
+included in the game state hash and engine saves.

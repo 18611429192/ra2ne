@@ -7,6 +7,7 @@ mod replay_file;
 pub mod rule_import;
 mod save;
 use economy::HarvestOrder;
+pub use ra2ne_assets::armor::{Armor, Verses};
 use ra2ne_core::{Unit, Vec2, World, navigation::NavigationMap};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -20,12 +21,14 @@ pub struct EntityId {
 }
 #[derive(Clone, Debug)]
 pub struct Weapon {
+    pub verses: Verses,
     pub damage: u32,
     pub range: u32,
     pub reload_ticks: u32,
 }
 #[derive(Clone, Debug)]
 pub struct UnitDef {
+    pub armor: Armor,
     pub name: String,
     pub health: u32,
     pub speed: i32,
@@ -386,6 +389,17 @@ impl Skirmish {
         }) {
             return Err("selected unit has no weapon");
         }
+        let armor = self.rules.units[victim.kind].armor;
+        if indexes.iter().any(|&index| {
+            !self.rules.units[self.slots[index].actor.as_ref().unwrap().kind]
+                .weapon
+                .as_ref()
+                .unwrap()
+                .verses
+                .can_target(armor)
+        }) {
+            return Err("selected weapon cannot target this armor");
+        }
         self.movement.stop_group(&indexes)?;
         for &index in &indexes {
             self.harvesting.remove(&self.entity_at(index).unwrap());
@@ -520,15 +534,23 @@ impl Skirmish {
                 continue;
             };
             let position = self.movement.unit(id.index as usize).unwrap().position;
-            let target = actor
-                .target
-                .filter(|&target| self.in_range(actor.owner, position, target, weapon.range));
+            let target = actor.target.filter(|&target| {
+                self.in_range(actor.owner, position, target, weapon.range)
+                    && weapon
+                        .verses
+                        .can_target(self.rules.units[self.actor(target).unwrap().kind].armor)
+            });
             let target = target.or_else(|| {
                 self.movement
                     .nearby_candidates(position, weapon.range as i32)
                     .into_iter()
                     .filter_map(|index| self.entity_at(index))
                     .filter(|&target| self.in_range(actor.owner, position, target, weapon.range))
+                    .filter(|&target| {
+                        weapon.verses.passive_acquire(
+                            self.rules.units[self.actor(target).unwrap().kind].armor,
+                        )
+                    })
                     .min_by_key(|target| {
                         (
                             distance_squared(
@@ -540,7 +562,13 @@ impl Skirmish {
                     })
             });
             if let Some(target) = target {
-                shots.push((id, target, weapon.damage, weapon.reload_ticks));
+                let armor = self.rules.units[self.actor(target).unwrap().kind].armor;
+                shots.push((
+                    id,
+                    target,
+                    weapon.verses.damage(weapon.damage, armor),
+                    weapon.reload_ticks,
+                ));
             }
         }
         for slot in &mut self.slots {
@@ -734,6 +762,7 @@ impl Skirmish {
             }
         }
         for d in &self.rules.units {
+            put(d.armor as u64);
             for &b in d.name.as_bytes() {
                 put(u64::from(b));
             }
@@ -747,6 +776,9 @@ impl Skirmish {
             put(u64::from(d.harvester));
             put(u64::from(d.weapon.is_some()));
             if let Some(w) = &d.weapon {
+                for value in w.verses.0 {
+                    put(u64::from(value));
+                }
                 put(u64::from(w.damage));
                 put(u64::from(w.range));
                 put(u64::from(w.reload_ticks));
@@ -768,11 +800,13 @@ mod tests {
     pub(super) fn game() -> Skirmish {
         let rules = Arc::new(Rules {
             units: vec![UnitDef {
+                armor: Armor::None,
                 name: "tank".into(),
                 health: 100,
                 speed: 1,
                 cost: 100,
                 weapon: Some(Weapon {
+                    verses: Verses::default(),
                     damage: 60,
                     range: 4,
                     reload_ticks: 2,
@@ -805,6 +839,63 @@ mod tests {
             ]),
         )
         .unwrap()
+    }
+    #[test]
+    fn armor_immunity_skips_nearest_target_and_attack_rejection_is_atomic() {
+        let mut game = game();
+        let rules = Arc::make_mut(&mut game.rules);
+        let mut immune = rules.units[0].clone();
+        immune.name = "immune".into();
+        immune.armor = Armor::Heavy;
+        immune.weapon = None;
+        rules.units.push(immune);
+        rules.units[0].weapon.as_mut().unwrap().verses.0[Armor::Heavy as usize] = 0;
+        let a = game.spawn(0, 0, Vec2::new(1, 1)).unwrap();
+        let b = game.spawn(1, 1, Vec2::new(2, 1)).unwrap();
+        let c = game.spawn(1, 0, Vec2::new(3, 1)).unwrap();
+        let before = game.state_hash();
+        assert!(game.attack(0, &[a], b).is_err());
+        assert_eq!(game.state_hash(), before);
+        game.tick();
+        assert_eq!(game.actor(b).unwrap().health, 100);
+        assert_eq!(game.actor(c).unwrap().health, 40);
+        assert!(game.events().iter().any(|e| matches!(e, Event::Shot { source, target, damage: 60 } if *source == a && *target == c)));
+    }
+    #[test]
+    fn special_verses_allow_explicit_attack_but_block_passive_acquisition() {
+        for percent in [1000, 2000] {
+            let mut game = game();
+            let rules = Arc::make_mut(&mut game.rules);
+            rules.units[0].weapon.as_mut().unwrap().damage = 100;
+            rules.units[0].weapon.as_mut().unwrap().verses.0[0] = percent;
+            let a = game.spawn(0, 0, Vec2::new(1, 1)).unwrap();
+            let b = game.spawn(1, 0, Vec2::new(2, 1)).unwrap();
+            game.tick();
+            assert!(game.events().is_empty());
+            game.attack(0, &[a], b).unwrap();
+            game.tick();
+            assert_eq!(game.actor(b).unwrap().health, 100 - percent / 1000);
+            assert_eq!(game.actor(a).unwrap().health, 100);
+        }
+    }
+    #[test]
+    fn armor_and_verses_are_part_of_handshake_hash_and_versioned_saves() {
+        let game = game();
+        let mut bytes = game.save().unwrap();
+        bytes[..8].copy_from_slice(b"RA2NEGS1");
+        assert!(Skirmish::load(&bytes).is_err());
+        let mut other = Skirmish::load(&game.save().unwrap()).unwrap();
+        Arc::make_mut(&mut other.rules).units[0].armor = Armor::Heavy;
+        assert_ne!(game.state_hash(), other.state_hash());
+        let restored = Skirmish::load(&other.save().unwrap()).unwrap();
+        assert_eq!(other.state_hash(), restored.state_hash());
+        Arc::make_mut(&mut other.rules).units[0]
+            .weapon
+            .as_mut()
+            .unwrap()
+            .verses
+            .0[5] = 50_000;
+        assert_ne!(restored.state_hash(), other.state_hash());
     }
     #[test]
     fn simultaneous_fire_is_mutually_lethal_and_slots_reject_stale_handles() {
