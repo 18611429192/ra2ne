@@ -15,6 +15,10 @@ fn argument(name: &str, default: usize) -> usize {
 }
 
 fn main() {
+    if env::args().any(|arg| arg == "--mix-check") {
+        mix_check();
+        return;
+    }
     if env::args().any(|arg| arg == "--asset-check") {
         asset_check();
         return;
@@ -230,9 +234,48 @@ fn asset_check() {
     .unwrap();
     let file = vfs.get("RULESMD.INI").unwrap().unwrap();
     assert_eq!(file.source, "synthetic-mod");
-    let overlay = Ini::parse(std::str::from_utf8(&file.bytes).unwrap()).unwrap();
+    let overlay = Ini::parse(std::str::from_utf8(file.bytes).unwrap()).unwrap();
     assert_eq!(overlay.get("unit0", "strength").unwrap().integer(), Ok(200));
     println!(
         "asset_frontend_verified=true; synthetic_unit_types=10000; entries=40000; parse_ms={parse_ms:.3}"
+    );
+}
+
+fn mix_check() {
+    use ra2ne_assets::mix::{FilenameHash, MixArchive, filename_id};
+    use std::sync::Arc;
+    let count = 10_000_u16;
+    let mut bytes = Vec::new();
+    bytes.extend(0_u32.to_le_bytes());
+    bytes.extend(count.to_le_bytes());
+    bytes.extend((u32::from(count) * 4).to_le_bytes());
+    for id in 0..u32::from(count) {
+        bytes.extend(
+            filename_id(&format!("asset{id}.bin"), FilenameHash::Ra2)
+                .unwrap()
+                .to_le_bytes(),
+        );
+        bytes.extend((id * 4).to_le_bytes());
+        bytes.extend(4_u32.to_le_bytes());
+    }
+    for id in 0..u32::from(count) {
+        bytes.extend(id.to_le_bytes());
+    }
+    let started = Instant::now();
+    let mix = MixArchive::parse(Arc::from(bytes)).unwrap();
+    let parse_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(mix.entry_count(), usize::from(count));
+    let started = Instant::now();
+    for id in 0..u32::from(count) {
+        assert_eq!(
+            mix.get(&format!("ASSET{id}.BIN"), FilenameHash::Ra2)
+                .unwrap()
+                .unwrap(),
+            &id.to_le_bytes()
+        );
+    }
+    println!(
+        "mix_verified=true; entries={count}; parse_ms={parse_ms:.3}; lookup_ms={:.3}",
+        started.elapsed().as_secs_f64() * 1000.0
     );
 }

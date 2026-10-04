@@ -18,7 +18,9 @@ This first version deliberately has no EA assets, renderer, or MOD dependency. I
 - bounded transport-independent multiplayer input barrier
 - versioned self-contained replay files with corruption checks and bounded decoding
 - ordered INI syntax frontend with source diagnostics and layered in-memory virtual files
-- no rendering or original resource codecs yet
+- MIX directory reading, encrypted headers, checksums, archive/loose overlays
+- explicit UTF-8, Windows-1252 and GBK resource text decoding
+- no rendering or complete original resource codecs yet
 
 ## Run
 
@@ -57,6 +59,19 @@ sections and last-value duplicate lookup. Registry entries retain source order.
 These are provisional frontend semantics pending original-game fixtures; parsed
 keys are not yet applied to unit/gameplay rules. VFS mounts replace whole files;
 INI rule merging across files is a separate future rules-loader operation.
+
+Inspect your own resource files without modifying them:
+
+```bash
+cargo run -p ra2ne-inspect --release -- ini /path/to/rulesmd.ini --encoding=gbk
+cargo run -p ra2ne-inspect --release -- mix /path/to/ra2md.mix
+cargo run -p ra2ne-inspect --release -- mix /path/to/ra2md.mix --nested=localmd.mix --file=rulesmd.ini
+cargo run -p ra2ne-bench --release -- --mix-check
+```
+
+Nested names depend on the actual archive. No archive extraction is needed for
+inspection. [Format notes](docs/FORMAT_NOTES.md) record supported variants and
+remaining compatibility work.
 
 ## Project principles
 

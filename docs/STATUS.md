@@ -100,3 +100,22 @@ hash 4c5d69f610b38d8a, 359.082 ms total. Synthetic tests do not establish
 original RA2/YR map or ordinary MOD compatibility. Next: loose-file inspection,
 MIX archive frontend and authentic compatibility fixtures, alongside remaining
 navigation/transport/gameplay milestones. 1.0 remains incomplete.
+
+## 2026-10-04: MIX resources and inspection entry point
+
+Implemented legacy and extended MIX directories, RA2/YR padded CRC32 and classic
+filename IDs, RSA-derived Blowfish encrypted headers, SHA-1 body verification,
+zero-copy archive entry views, nested archive inspection and atomic loose-file
+imports. MIX/loose mounts share one explicit overlay order. Added explicit
+UTF-8, Windows-1252 and GBK decoding, with invalid-input diagnostics. Added
+ra2ne-inspect ini/mix CLI. No original resources are bundled or used in these
+checks; XCC name databases and automatic original-game mount policy remain
+pending. See FORMAT_NOTES.md for source references and format boundaries.
+
+Verification: 36 workspace tests, Clippy and Release passed. CLI read an
+independently generated nested encrypted/checksummed MIX and its rulesmd.ini,
+and decoded Chinese GBK INI. --mix-check: 10,000 entries parse 1.379 ms, all
+10,000 named lookups 3.543 ms. Bridge: 0.216 ms/Tick, unchanged hash
+c0c6b5571b31487c. Replay/file/lockstep: 31 checkpoints, unchanged hash
+4c5d69f610b38d8a, verification 361.427 ms. Original assets, maps, rendering
+and gameplay remain required for 1.0 acceptance.

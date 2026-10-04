@@ -4,6 +4,7 @@ members = [
   "crates/ra2ne-core",
   "crates/ra2ne-assets",
   "apps/ra2ne-bench",
+  "apps/ra2ne-inspect",
 ]
 
 [workspace.package]
