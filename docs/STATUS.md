@@ -542,3 +542,18 @@ previous state hash. 114 regular workspace tests and strict Clippy pass. The
 private whole-map acceptance test still reports the same 11 terrain/overlay
 failures. Scenery collision, animation, shadows, emitted lighting and destruction
 are pending. Full original gameplay and the overall 1.0 estimate remain unchanged.
+
+## 2026-10-05: original static infantry
+
+Added bounded Ready-sequence metadata and original infantry SHP images in the map
+viewer. Eight facing buckets, grid subcells and map elevation select and position
+standing frames. Actor ordering and source metadata remain intact; unsupported
+actors keep their placeholders and bad frames are diagnosed. Image caching is
+bounded and culling uses rendered bounds.
+
+The full-map graphics check resolves all 4,011 infantry in 371 maps, including
+nine existing E1 definitions under a map registry override. NewUrban window
+screenshots show original civilian figures. 116 regular tests, strict Clippy and
+release builds pass. The same 11 whole-map terrain/overlay gaps remain visible.
+Owner remap, shadows, action animation, VXL actors and original gameplay are
+pending. The overall 1.0 estimate remains unchanged.

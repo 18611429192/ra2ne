@@ -165,3 +165,26 @@ case-insensitive types, rules/art aliases, native palette identity, frame-zero
 pixels, scenery anchoring and preservation/diagnosis of invalid records.
 Animation, shadows, emitted light, occupation/collision and destruction remain
 pending, as does complete original gameplay.
+
+## Static infantry graphics (2026-10-05)
+
+All **4,011 placed infantry records across 371 maps** now resolve standing SHP
+frames with zero unresolved infantry records. The original 11 whole-map
+terrain/overlay failures remain unchanged; the strict private acceptance test
+still fails overall and remains ignored in regular CI.
+
+NewUrban/19a211e3 has 45 infantry actors and 16 distinct selected images, including
+visible original civilian figures in the inspected window screenshot. The first
+full check exposed nine E1 actors in mapsmd03/73220e81 whose map overrides replace
+a base InfantryTypes registry label. The graphics loader now permits existing
+rules definitions, and the repeated full check resolves all nine.
+
+116 regular workspace tests pass, with strict Clippy, formatting and release
+builds. New synthetic regressions verify Ready start/count/stride bounds, all
+256 facing values, existing definitions under registry overrides, stable actor
+IDs, image aliases, unit palette pixels, subcells, map height and out-of-range
+frames without clamping. Only static Ready poses are implemented: owner remap,
+shadows, missions/action animation, VXL actors and original gameplay are pending.
+
+The NewUrban release viewer was also run for 120 window frames. Its 441 actor
+records produce hash `4ded6965e81531ec`, matching a separate 120-tick headless run.

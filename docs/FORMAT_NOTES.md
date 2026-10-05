@@ -253,3 +253,27 @@ offset from the projected cell center is `(-width/2, -height/2-3)`.
 The renderer tests the full image bounds independently of the cell's TMP bounds,
 so tall trees remain drawable while their cell anchor is outside the viewport.
 This is static drawing, not original per-pixel depth or terrain-object gameplay.
+
+## Static original infantry Ready poses
+
+Infantry art resolves the rules Image alias and optional art Image alias, reads
+Sequence from the original art definition, and selects the first Ready frame
+for each direction. Ready currently accepts three nonnegative fields:
+`start,count,stride`; start/stride/count are checked against the SHP format's
+10,000-frame limit. Zero count, negative numbers, extended/fixed-direction
+fields and unsupported art flags/custom palettes are diagnosed.
+
+The [EA drawing code](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditor/IsoView.cpp)
+uses infantry direction `(7-facing/32)%8`. The resulting frame is
+`start + direction*stride`. Subcells 0 through 4 have projected offsets
+`(0,-7)`, `(15,0)`, `(-15,0)`, `(0,7)` and `(0,0)` for 60x30 cells.
+The complete SHP canvas is centered there, with map height shifting Y upward
+by 15 pixels per level. Actors preserve the original map record order, and image
+bounds determine culling. Palette index zero is transparent; unit palettes are
+selected by current theater. Owner remap and shadows are not applied.
+
+The narrow renderer currently accepts ordinary image.shp files. Voxel,
+NewTheater, TerrainPalette and custom Palette infantry art are unsupported.
+A type with an existing rules definition remains drawable when map overrides
+replace its InfantryTypes registry label. This graphics behavior does not
+establish the game's complete registration/INI-loading semantics.

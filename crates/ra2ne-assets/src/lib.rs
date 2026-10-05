@@ -1,6 +1,7 @@
 //! Compatibility frontend primitives. No game data is distributed here.
 //! INI syntax and virtual files are independent from simulation rules.
 pub mod armor;
+pub mod infantry;
 pub mod ini;
 pub mod map;
 pub mod mix;

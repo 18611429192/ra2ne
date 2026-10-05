@@ -42,3 +42,8 @@ Placed trees, lamps and signs now render as static original scenery. All 165,818
 scenery references across 371 maps resolve, with inspected release screenshots.
 This advances original-resource viewing; scenery collision, animation and full
 original gameplay remain pending. The overall estimate remains approximately 25%.
+
+Static original infantry now render with standing sequence frames, facings,
+subcells and elevation. All 4,011 placed infantry references across 371 maps
+resolve. This does not yet include owner remap, shadows, action animation, VXL
+vehicles/aircraft or original combat. Overall estimated coverage remains 25%.

@@ -210,3 +210,17 @@ theater resources, with a separate scenery count and bounded image cache. The
 viewer currently uses frame zero and simple cell sorting; animation, light
 emission, shadows, collision and destruction are pending. Invalid records remain
 in the source INI and are diagnosed rather than becoming usable coordinates.
+
+Original placed infantry now use static SHP Ready poses in directory mode,
+including rules/art Image aliases, Sequence metadata, eight map facings, infantry
+subcells, terrain height and the matching unit palette. Missing images and bad
+frame references remain explicit; unsupported actors keep their placeholders.
+Owner remap, shadows, action/mission animation and original combat are pending;
+vehicles/aircraft with VXL graphics and buildings are not rendered by this path.
+
+The screenshots run RA2NE's native Rust/Linux executable against original game
+assets, not the Windows game's EXE or Wine. A virtual X server supplies the test
+window and the renderer exports a framebuffer screenshot after the requested
+frames. Reading original resources does not imply that original gameplay is
+implemented. Native Windows builds and full cross-platform acceptance remain to
+be verified.

@@ -67,6 +67,9 @@ fn all_private_map_graphics_resolve_and_decode() {
     let mut empty_cells = 0;
     let mut outside_cells = 0;
     let mut overlay_images = 0;
+    let mut infantry_actors = 0;
+    let mut infantry_unresolved = 0;
+    let mut infantry_failures = 0;
     let mut scenery_cells = 0;
     let mut scenery_images = 0;
     let mut scenery_failures = 0;
@@ -105,6 +108,23 @@ fn all_private_map_graphics_resolve_and_decode() {
                     Some(error)
                 }
             };
+            let infantry_error =
+                match super::infantry::Scene::load(&files, &map, &text, edition, encoding) {
+                    Ok(scene) => {
+                        infantry_actors += scene.cells;
+                        infantry_unresolved += scene.unresolved;
+                        if scene.unresolved > 0 {
+                            infantry_failures += 1;
+                            Some(scene.report())
+                        } else {
+                            None
+                        }
+                    }
+                    Err(error) => {
+                        infantry_failures += 1;
+                        Some(error)
+                    }
+                };
             let check = (|| -> Result<(), String> {
                 for (id, subtiles) in tiles {
                     let resolved = catalogue
@@ -156,6 +176,9 @@ fn all_private_map_graphics_resolve_and_decode() {
             if let Some(error) = scenery_error {
                 errors.push(error);
             }
+            if let Some(error) = infantry_error {
+                errors.push(error);
+            }
             if !errors.is_empty() {
                 failures.push(format!("{}: {}", path.display(), errors.join("; ")));
             }
@@ -173,6 +196,9 @@ fn all_private_map_graphics_resolve_and_decode() {
     );
     println!(
         "map_scenery_cells={scenery_cells}; images={scenery_images}; outside={scenery_outside}; failing_maps={scenery_failures}"
+    );
+    println!(
+        "map_infantry_actors={infantry_actors}; unresolved={infantry_unresolved}; failing_maps={infantry_failures}"
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

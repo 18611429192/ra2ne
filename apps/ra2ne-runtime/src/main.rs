@@ -1,6 +1,7 @@
 //! Interactive engine preview. Synthetic scenario plus decoded map/sprite views.
 //! This is an integration milestone, not the finished RA2/YR game.
 mod battle;
+mod infantry;
 mod installation;
 #[cfg(test)]
 mod map_validation;
@@ -429,6 +430,9 @@ impl Scene {
             if let Some(overlays) = &terrain.overlays {
                 messages.push(overlays.statistics.report());
             }
+            if let Some(infantry) = &terrain.infantry {
+                messages.push(infantry.report());
+            }
             if let Some(scenery) = &terrain.scenery {
                 messages.push(scenery.statistics.report_as("Scenery"));
             }
@@ -576,6 +580,12 @@ async fn run(options: Options, mut scene: Scene) {
         .as_ref()
         .and_then(|t| t.scenery.as_ref())
         .map(overlays::Scene::textures)
+        .unwrap_or_default();
+    let infantry_textures = scene
+        .terrain
+        .as_ref()
+        .and_then(|t| t.infantry.as_ref())
+        .map(infantry::Scene::textures)
         .unwrap_or_default();
     let texture = scene.sprite.as_ref().map(|(shp, pal)| {
         let image = shp.frame(0).expect("validated sprite frame");
@@ -846,11 +856,25 @@ async fn run(options: Options, mut scene: Scene) {
                 }
                 let unit = scene.world.unit(id).unwrap();
                 let p = view.screen(unit.position, 0);
-                (p.x >= -80.0
-                    && p.x < screen_width() - SIDEBAR + 80.0
-                    && p.y >= -80.0
-                    && p.y < screen_height() + 80.0)
-                    .then_some((id, p, unit.position.x + unit.position.y))
+                let infantry_image = scene
+                    .terrain
+                    .as_ref()
+                    .and_then(|t| t.infantry.as_ref())
+                    .and_then(|i| i.texture(id, &infantry_textures));
+                let visible = if let Some((texture, offset)) = infantry_image {
+                    let origin = p + vec2(offset.0 as f32, offset.1 as f32) * view.zoom;
+                    let size = vec2(texture.width(), texture.height()) * view.zoom;
+                    origin.x + size.x >= 0.0
+                        && origin.x < screen_width() - SIDEBAR
+                        && origin.y + size.y >= 56.0
+                        && origin.y < screen_height()
+                } else {
+                    p.x >= -80.0
+                        && p.x < screen_width() - SIDEBAR + 80.0
+                        && p.y >= -80.0
+                        && p.y < screen_height() + 80.0
+                };
+                visible.then_some((id, p, unit.position.x + unit.position.y))
             })
             .collect();
         visible.sort_by_key(|&(id, _, depth)| (depth, id));
@@ -879,7 +903,23 @@ async fn run(options: Options, mut scene: Scene) {
                     Color::from_rgba(190, 236, 147, 255),
                 );
             }
-            if let Some(texture) = &texture {
+            let infantry_image = scene
+                .terrain
+                .as_ref()
+                .and_then(|t| t.infantry.as_ref())
+                .and_then(|i| i.texture(*id, &infantry_textures));
+            if let Some((texture, offset)) = infantry_image {
+                draw_texture_ex(
+                    texture,
+                    p.x + offset.0 as f32 * view.zoom,
+                    p.y + offset.1 as f32 * view.zoom,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(vec2(texture.width(), texture.height()) * view.zoom),
+                        ..Default::default()
+                    },
+                );
+            } else if let Some(texture) = &texture {
                 draw_texture_ex(
                     texture,
                     p.x - texture.width() * view.zoom / 2.0,
