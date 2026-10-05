@@ -60,7 +60,7 @@ fn map_report(bytes: &[u8], encoding: TextEncoding) -> Result<(), String> {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.len() < 2 {
-        return Err("usage: ra2ne-inspect audit|ini|map|rules|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk] [--overlay=PATH]".into());
+        return Err("usage: ra2ne-inspect audit|theater|ini|map|rules|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk] [--overlay=PATH] [--extension=tem|sno|urb|des|ubn|lun]".into());
     }
     if args[0] == "audit" {
         if args.len() != 2 {
@@ -68,13 +68,19 @@ fn run() -> Result<(), String> {
         }
         return audit::run(&args[1]);
     }
+    let mut extension = "tem";
     let mut file_name = None;
     let mut nested = None;
     let mut hash = FilenameHash::Ra2;
     let mut encoding = TextEncoding::Utf8;
     let mut overlays = Vec::new();
     for arg in &args[2..] {
-        if let Some(value) = arg.strip_prefix("--overlay=") {
+        if let Some(value) = arg.strip_prefix("--extension=") {
+            if args[0] != "theater" {
+                return Err("extension requires theater mode".into());
+            }
+            extension = value;
+        } else if let Some(value) = arg.strip_prefix("--overlay=") {
             overlays.push(value);
         } else if let Some(value) = arg.strip_prefix("--file=") {
             file_name = Some(value);
@@ -96,6 +102,21 @@ fn run() -> Result<(), String> {
         return Err("overlay options require rules mode".into());
     }
     match args[0].as_str() {
+        "theater" => {
+            if file_name.is_some() || nested.is_some() {
+                return Err("file/nested options require mix mode".into());
+            }
+            let bytes = read_bounded(&args[1], 16 * 1024 * 1024)?;
+            let text = encoding.decode(&bytes)?;
+            let theater = ra2ne_assets::theater::Theater::parse(&text, extension)?;
+            println!("theater_tile_files={}", theater.tiles.len());
+            for (id, tile) in theater.tiles.iter().enumerate() {
+                println!(
+                    "tile_id={id}; set={}; number={}; filename={}",
+                    tile.set, tile.number, tile.filename
+                );
+            }
+        }
         "map" => {
             if file_name.is_some() || nested.is_some() {
                 return Err("file/nested options require mix mode".into());

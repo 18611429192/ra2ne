@@ -449,3 +449,23 @@ rule-discovery results and limitations are in REAL_RESOURCE_VALIDATION.md.
 
 1.0 remains incomplete. Overall estimated feature coverage stays approximately
 25%, because parsing authentic resources does not establish original gameplay.
+
+### Theater catalogue and base terrain viewer
+
+The assets frontend now resolves numeric TileSet sections into global map tile
+IDs, including zero-sized sets. It rejects missing sections, excessive counts and
+unsafe filename prefixes. The runtime accepts explicit theater INI/PAL/MIX
+resources, caches decoded tile/subtile images within 128 MiB, creates nearest
+filtered textures and draws them at the existing 60x30 isometric projection.
+Terrain MIX mounts share an archive byte budget and later mounts take precedence.
+Unresolved cells are reported and retain the synthetic fallback.
+
+Validation: 99 workspace tests and strict Clippy passed. The actual temperate
+catalogue resolves 838 filenames. Loading the previously tested real map
+`86b74276.map` with isotemp/isotemmd decoded 598 distinct base images, reported
+920 cells with negative tile IDs and five variants with pending extra graphics.
+At 120 headless ticks its 26 actors retain hash `6209414cb5672eb7`.
+This validates resource resolution/decoding; the interactive texture placement
+has not been visually verified in this environment. No original files are shipped.
+Automatic game-directory mounting, clear-cell handling, extras, lighting and
+occlusion remain incomplete; the overall 1.0 estimate remains unchanged.

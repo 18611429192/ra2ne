@@ -160,3 +160,20 @@ for the complete runnable fixture command and limits.
 Battle previews can now record local commands with `--record-replay=PATH` and
 verify the saved session headlessly with standalone `--play-replay=PATH`.
 The production queue is paged and individual jobs can be cancelled/refunded.
+
+The original-map viewer can now load **base TMP terrain images** using an
+explicit theater INI, terrain palette and one or more extracted terrain MIXs:
+
+```sh
+cargo run --release -p ra2ne-runtime -- --map=example.mpr --encoding=windows1252 --terrain-ini=temperat.ini --terrain-palette=temperat.pal --terrain-mix=isotemp.mix --terrain-mix=isotemmd.mix
+cargo run -p ra2ne-inspect -- theater temperat.ini --extension=tem --encoding=windows1252
+```
+
+Repeated terrain MIX options mount in command-line order; later mounts override
+earlier ones. These are explicit resources, not an automatic installation search
+profile. Use the INI and palette matching your map and resource edition. The
+inspector defaults to `.tem`; select the correct extension for other theaters.
+The viewer reports unresolved cells and uses its synthetic diamond fallback for
+them. Negative tile IDs are currently unresolved. Extra TMP graphics, damaged
+variants, random tile variants, lighting, Z-buffer occlusion and terrain
+passability are pending. Loading terrain images does not enable original gameplay.

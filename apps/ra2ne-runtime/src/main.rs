@@ -4,6 +4,7 @@ mod battle;
 mod production_ui;
 mod rule_scenario;
 mod session;
+mod terrain;
 use battle::Simulation;
 use macroquad::prelude::*;
 use ra2ne_assets::{
@@ -17,6 +18,7 @@ use std::{collections::BTreeSet, io::Read, sync::Arc};
 const SIDEBAR: f32 = 264.0;
 #[derive(Default)]
 struct Options {
+    terrain: terrain::Options,
     units: usize,
     map: Option<String>,
     sprite: Option<String>,
@@ -56,6 +58,12 @@ impl Options {
                 options.autoplay = true;
             } else if let Some(v) = arg.strip_prefix("--units=") {
                 options.units = v.parse().map_err(|_| "invalid unit count")?;
+            } else if let Some(v) = arg.strip_prefix("--terrain-ini=") {
+                options.terrain.ini = Some(v.into());
+            } else if let Some(v) = arg.strip_prefix("--terrain-palette=") {
+                options.terrain.palette = Some(v.into());
+            } else if let Some(v) = arg.strip_prefix("--terrain-mix=") {
+                options.terrain.mixes.push(v.into());
             } else if let Some(v) = arg.strip_prefix("--map=") {
                 options.map = Some(v.into());
             } else if let Some(v) = arg.strip_prefix("--sprite=") {
@@ -127,6 +135,7 @@ impl Options {
         if options.units > 20_000 {
             return Err("preview supports up to 20000 units".into());
         }
+        options.terrain.validate(options.map.is_some())?;
         if options.sprite.is_some() != options.palette.is_some() {
             return Err("sprite and palette must be supplied together".into());
         }
@@ -154,6 +163,7 @@ struct Scene {
     name: String,
     map_view_only: bool,
     messages: Vec<String>,
+    terrain: Option<terrain::Terrain>,
     sprite: Option<(Shp, Palette)>,
     center: Cell,
 }
@@ -202,6 +212,7 @@ impl Scene {
         Ok(())
     }
     fn load(options: &Options) -> Result<Self, String> {
+        let mut terrain = None;
         let sprite = match (&options.sprite, &options.palette) {
             (Some(shp), Some(pal)) => {
                 let shp = Shp::parse(Arc::from(read(shp, 64 * 1024 * 1024)?))?;
@@ -218,6 +229,13 @@ impl Scene {
                     .unwrap_or(TextEncoding::Utf8)
                     .decode(&bytes)?;
                 let original = Ra2Map::parse(&text)?;
+                if options.terrain.enabled() {
+                    terrain = Some(terrain::Terrain::load(
+                        &options.terrain,
+                        &original,
+                        options.encoding.unwrap_or(TextEncoding::Utf8),
+                    )?);
+                }
                 let tiles: Vec<_> = original
                     .tiles
                     .iter()
@@ -386,7 +404,12 @@ impl Scene {
                 })
                 .collect();
         }
+        if let Some(terrain) = &terrain {
+            messages.push(terrain.report.clone());
+        }
+        tiles.sort_by_key(|(cell, _)| (cell.x + cell.y, cell.x));
         Ok(Self {
+            terrain,
             world,
             map,
             tiles,
@@ -511,6 +534,11 @@ async fn run(options: Options, mut scene: Scene) {
         ),
         zoom: 0.8,
     };
+    let terrain_textures = scene
+        .terrain
+        .as_ref()
+        .map(terrain::Terrain::textures)
+        .unwrap_or_default();
     let texture = scene.sprite.as_ref().map(|(shp, pal)| {
         let image = shp.frame(0).expect("validated sprite frame");
         let texture = Texture2D::from_rgba8(image.width, image.height, &pal.rgba(&image, true));
@@ -688,7 +716,24 @@ async fn run(options: Options, mut scene: Scene) {
             } else {
                 Color::from_rgba(60, 77, 50, 255)
             };
-            diamond(pos, 60.0 * view.zoom, 30.0 * view.zoom, tint);
+            if let Some(texture) = scene
+                .terrain
+                .as_ref()
+                .and_then(|t| t.texture((p.x, p.y), &terrain_textures))
+            {
+                draw_texture_ex(
+                    texture,
+                    pos.x - 30.0 * view.zoom,
+                    pos.y - 15.0 * view.zoom,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(vec2(60.0, 30.0) * view.zoom),
+                        ..Default::default()
+                    },
+                );
+            } else {
+                diamond(pos, 60.0 * view.zoom, 30.0 * view.zoom, tint);
+            }
             if let Simulation::Battle(game) = &scene.world
                 && game.resource(p) > 0
             {

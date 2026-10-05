@@ -8,5 +8,6 @@ pub mod pack;
 pub mod rules;
 pub mod sprite;
 pub mod text;
+pub mod theater;
 pub mod tmp;
 pub mod vfs;
