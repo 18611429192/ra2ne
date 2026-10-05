@@ -31,3 +31,9 @@ Stock directory terrain viewing now loads samples from all six theaters, handles
 clear markers and composites extra graphics with matching ISO palettes. Window
 screenshots were inspected. Full map rendering and original gameplay acceptance
 are still pending; the overall coverage estimate remains unchanged.
+
+Static original overlays now render with stock rules/art aliases, SHP frames and
+theater palettes. Six theater samples resolve all overlay references. A strict
+371-map graphics check passes 360 maps and reports 11 remaining failures involving
+terrain resources/subtiles and overlay frame references. These are documented
+acceptance gaps; original gameplay and the 1.0 estimate remain unchanged.

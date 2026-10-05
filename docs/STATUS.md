@@ -504,3 +504,24 @@ Original actors are still placeholders. Overlays/bridge spans, animated tiles,
 random/damaged variants, lighting and pixel depth order, terrain passability and
 original gameplay remain incomplete. This advances authentic terrain viewing,
 not full-game acceptance; the overall 1.0 coverage estimate remains about 25%.
+
+## 2026-10-05: original static overlays and full-map graphics checks
+
+Added ordered OverlayTypes metadata, map Image overrides, SHP frame lookup,
+NewTheater generic G variants and resource/ISO/unit palette selection. The stock
+installation profile mounts conquer/conqmd and generic/genermd. Runtime draws
+ore/gems, walls, bridges and other static overlays alongside TMP terrain, with
+bounded caches and image-bound culling. Missing references, transparent frames
+and off-terrain references have distinct diagnostics; source map arrays survive.
+
+Six real theater samples have zero unresolved overlay cells. NewUrban/Lunar
+screenshots were inspected; the 120-frame Temperate viewer retains its previous
+state hash. 113 regular workspace tests pass, strict Clippy and release builds
+pass. Synthetic regressions cover ID ordering, aliases, palette identity, generic
+wall lookup, geometry, exact frame references and unsupported data diagnostics.
+
+The new opt-in strict acceptance test checks all 371 private maps: 360 pass and
+11 fail on remaining terrain resources/subtiles or overlay frame references.
+See REAL_RESOURCE_VALIDATION.md for exact map IDs and reproduction. These failures
+remain visible; static overlay support does not establish full-map acceptance,
+original gameplay or a completed 1.0. Overall feature estimate remains about 25%.

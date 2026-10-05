@@ -66,12 +66,14 @@ pub struct Terrain {
     cells: BTreeMap<(i32, i32), (i16, u8)>,
     images: BTreeMap<(i16, u8), Image>,
     pub report: String,
+    pub overlays: Option<super::overlays::Scene>,
 }
 impl Terrain {
     pub fn load(
         options: &Options,
         map: &Ra2Map,
         encoding: ra2ne_assets::text::TextEncoding,
+        map_text: &str,
     ) -> Result<Self, String> {
         options.validate(true)?;
         if !options.enabled() {
@@ -104,6 +106,17 @@ impl Terrain {
                 files.mount_mix(path, MixArchive::parse(bytes.into())?, FilenameHash::Ra2)?;
             }
             (theater, palette, files)
+        };
+        let overlays = if options.game_dir.is_some() {
+            Some(super::overlays::Scene::load(
+                &files,
+                map,
+                map_text,
+                options.edition.unwrap(),
+                encoding,
+            )?)
+        } else {
+            None
         };
         for diagnostic in &theater.diagnostics {
             eprintln!("theater catalogue: {diagnostic}");
@@ -194,6 +207,7 @@ impl Terrain {
         );
         eprintln!("{report}");
         Ok(Self {
+            overlays,
             cells,
             images,
             report,

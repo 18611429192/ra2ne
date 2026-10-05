@@ -210,3 +210,27 @@ the diamond; transparent extra pixels preserve base pixels. Bounding arithmetic
 uses i64 before dimension conversion, limits each composite to 4,194,304 pixels,
 and leaves Z planes separate. This basic image composition is not Z-buffer
 rendering or an implementation of the original game's complete rendering order.
+
+## Static overlay lookup
+
+The [EA loading code](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditor/Loading.cpp)
+and [drawing code](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditor/IsoView.cpp)
+describe overlay enumeration, image aliases, palette selection and bridge/track
+positioning. RA2NE uses ordered OverlayTypes values as byte IDs; numeric keys
+are labels rather than sparse array indices. Invalid definitions retain their
+slots. Byte 255 denotes no overlay. OverlayData is a direct SHP frame reference;
+invalid references are reported without rewriting or clamping the source map.
+
+YR uses rulesmd/artmd as its base catalogue, with map rules applied afterwards.
+Theater-suffixed SHPs use the corresponding ISO palette; generic/NewTheater
+SHPs use unit palettes. Resource overlays use the ordinary temperat.pal palette.
+NewTheater lookup includes the generic G variant before other theater variants;
+this is required for Yuri's GGFWLL wall in the supplied Desert/Lunar samples.
+The installation profile also mounts conquer/conqmd and generic/genermd archives.
+Corrupt preferred assets are errors. Unsupported custom art palettes are diagnosed.
+
+The viewer retains the full SHP canvas and frame offsets, applies static
+bridge/track offsets and culls by image bounds. Fully transparent frames and
+references outside decoded terrain cells are counted separately. Source arrays
+are preserved. RGBA caching is bounded to 128 MiB. Animation, damage selection,
+per-pixel depth, remap/shadows and gameplay remain pending.

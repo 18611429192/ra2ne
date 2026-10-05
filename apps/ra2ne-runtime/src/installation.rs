@@ -150,6 +150,8 @@ pub fn load(
         for nested in [
             "local.mix",
             "cache.mix",
+            "conquer.mix",
+            "generic.mix",
             "temperat.mix",
             "tem.mix",
             if theater == "NEWURBAN" {
@@ -174,6 +176,8 @@ pub fn load(
             profile.base_mix,
             "localmd.mix",
             "cachemd.mix",
+            "conqmd.mix",
+            "genermd.mix",
             "temperatmd.mix",
             "temmd.mix",
             if theater == "NEWURBAN" {

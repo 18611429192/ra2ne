@@ -91,3 +91,56 @@ This validates these sample maps and the basic rendering path. It does not
 certify every original map, the complete stock/mod mount order, overlays and
 animation, per-pixel depth/lighting, navigation or gameplay. 107 current workspace
 tests pass; the 1.0 feature-coverage estimate remains about 25%.
+
+## Static overlays and complete map graphics audit (2026-10-05)
+
+Directory mode now resolves and renders static original overlay images. The six
+previous samples have these results; each reports zero unresolved overlay cells.
+Empty means a referenced frame is entirely transparent, not a missing image.
+
+| Theater | Overlay cells | Cached images | Empty cells |
+| --- | ---: | ---: | ---: |
+| Temperate | 712 | 16 | 0 |
+| Snow | 301 | 23 | 161 |
+| Urban | 230 | 31 | 0 |
+| Desert | 929 | 71 | 84 |
+| NewUrban | 743 | 43 | 0 |
+| Lunar | 259 | 19 | 0 |
+
+NewUrban and Lunar window screenshots were inspected for visible resources,
+bridge alignment and Yuri walls. multimd/86b74276 resolves 730 overlay cells and
+26 images, with 105 transparent cells and no unresolved cells. Its actual
+120-frame window run still produces hash `6209414cb5672eb7`.
+
+A new strict opt-in graphics acceptance check processes every map against the
+selected stock installation, checking terrain composites, SHP frame references
+and palettes. With YR selected, **360 of 371 maps pass; 11 maps fail**. All 371
+still parse structurally. This is broader coverage than the six successful
+samples and exposes remaining acceptance gaps rather than certifying every map.
+
+| Failure | Map archive / ID |
+| --- | --- |
+| Missing Cliff12.sno subtile 2 | maps01/9103f015; maps02/9103f015 |
+| Missing Cliff13.sno subtile 1 | maps02/439fea47 |
+| Missing Cliff26.urb subtile 1 | maps02/b7ce3f39 |
+| Missing hyte01.tem resource | multi/1d555268; multimd/b00a1790 |
+| LOBRDB01.sno frame references 6, 9, 10, 12 (30 cells) | maps02/1d3dc118 |
+| WCRATE.tem frame reference 10 | multi/10d1801a; multimd/59b25b1a |
+| CRATE.tem frame reference 255 | multi/c1180b29; multimd/2b5e99be |
+
+The check stops terrain validation at the first terrain error in each map;
+reported failures are not an exhaustive count of bad cells. No frame clamping,
+resource substitution or source-map repair is used to make this check pass.
+Original runtime behavior for these references still needs investigation.
+The strict private test currently fails on this installation as expected and is
+ignored by default; CI does not require or redistribute game resources.
+
+```sh
+RA2NE_GAME_DIR=/absolute/path/to/game RA2NE_MAP_DIR=/absolute/path/to/maps \
+RA2NE_EDITION=yr RA2NE_MAP_ENCODING=windows1252 \
+cargo test -p ra2ne-runtime all_private_map_graphics_resolve_and_decode -- --ignored --nocapture
+```
+
+113 regular workspace tests pass, plus this separately run private acceptance
+check. Overlay rendering remains static: mining/growth, connectivity, bridge
+passability, animation, shadows, lighting and original gameplay are unfinished.

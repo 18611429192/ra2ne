@@ -4,6 +4,7 @@ pub mod armor;
 pub mod ini;
 pub mod map;
 pub mod mix;
+pub mod overlay;
 pub mod pack;
 pub mod rules;
 pub mod sprite;

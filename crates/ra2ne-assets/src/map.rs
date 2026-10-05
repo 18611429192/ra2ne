@@ -292,6 +292,7 @@ impl Ra2Map {
             diagnostics,
         })
     }
+    /// Row-major 512x512 arrays retain off-map entries and the 0xff empty marker.
     pub fn overlay_at(&self, cell: Cell) -> Option<(u8, u8)> {
         if usize::from(cell.x) >= OVERLAY_SIDE || usize::from(cell.y) >= OVERLAY_SIDE {
             return None;
@@ -381,6 +382,18 @@ mod tests {
             "[Basic]\nName=Synthetic\n[Map]\nSize=0,0,10,10\nLocalSize=1,1,8,8\nTheater=TEMPERATE\n[IsoMapPack5]\n1={}\n[Waypoints]\n0=3002\n[Units]\n0=Americans,TANK,256,2,3,64,Guard,None,0,0\n[Infantry]\n0=Americans,SOLDIER,128,2,3,1,Guard,32,None\n[Structures]\n0=Americans,FACTORY,256,2,3,0,None\n[Triggers]\nT=opaque trigger\n",
             STANDARD.encode(packed)
         )
+    }
+    #[test]
+    fn overlay_arrays_keep_row_order_frame_byte_and_off_map_entries() {
+        let mut map = Ra2Map::parse(&sample()).unwrap();
+        assert_eq!(map.overlay_at(Cell { x: 2, y: 3 }), Some((255, 0)));
+        map.overlays[3 * OVERLAY_SIDE + 2] = 0;
+        map.overlay_data[3 * OVERLAY_SIDE + 2] = 17;
+        assert_eq!(map.overlay_at(Cell { x: 2, y: 3 }), Some((0, 17)));
+        assert_eq!(map.overlay_at(Cell { x: 3, y: 2 }), Some((255, 0)));
+        map.overlays[511 * OVERLAY_SIDE + 511] = 254;
+        assert_eq!(map.overlay_at(Cell { x: 511, y: 511 }), Some((254, 0)));
+        assert_eq!(map.overlay_at(Cell { x: 512, y: 0 }), None);
     }
     #[test]
     fn original_style_four_byte_trailer_is_preserved_without_creating_a_cell() {

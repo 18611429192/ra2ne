@@ -2,6 +2,9 @@
 //! This is an integration milestone, not the finished RA2/YR game.
 mod battle;
 mod installation;
+#[cfg(test)]
+mod map_validation;
+mod overlays;
 mod production_ui;
 mod rule_scenario;
 mod session;
@@ -243,6 +246,7 @@ impl Scene {
                         &options.terrain,
                         &original,
                         map_encoding,
+                        &text,
                     )?);
                 }
                 let tiles: Vec<_> = original
@@ -422,6 +426,9 @@ impl Scene {
         }
         if let Some(terrain) = &terrain {
             messages.push(terrain.report.clone());
+            if let Some(overlays) = &terrain.overlays {
+                messages.push(overlays.statistics.report());
+            }
         }
         tiles.sort_by_key(|(cell, _)| (cell.x + cell.y, cell.x));
         Ok(Self {
@@ -554,6 +561,12 @@ async fn run(options: Options, mut scene: Scene) {
         .terrain
         .as_ref()
         .map(terrain::Terrain::textures)
+        .unwrap_or_default();
+    let overlay_textures = scene
+        .terrain
+        .as_ref()
+        .and_then(|t| t.overlays.as_ref())
+        .map(overlays::Scene::textures)
         .unwrap_or_default();
     let texture = scene.sprite.as_ref().map(|(shp, pal)| {
         let image = shp.frame(0).expect("validated sprite frame");
@@ -737,11 +750,27 @@ async fn run(options: Options, mut scene: Scene) {
                     )
                 },
             );
-            if origin.x + size.x < 0.0
-                || origin.x > screen_width() - SIDEBAR
-                || origin.y + size.y < 56.0
-                || origin.y > screen_height()
-            {
+            let overlay_image = scene
+                .terrain
+                .as_ref()
+                .and_then(|t| t.overlays.as_ref())
+                .and_then(|o| o.texture((p.x, p.y), &overlay_textures));
+            let overlay_bounds = overlay_image.map(|image| {
+                (
+                    pos + vec2(image.offset.0 as f32, image.offset.1 as f32) * view.zoom,
+                    vec2(image.texture.width(), image.texture.height()) * view.zoom,
+                )
+            });
+            let in_view = |origin: macroquad::math::Vec2, size: macroquad::math::Vec2| {
+                origin.x + size.x >= 0.0
+                    && origin.x <= screen_width() - SIDEBAR
+                    && origin.y + size.y >= 56.0
+                    && origin.y <= screen_height()
+            };
+            let terrain_visible = in_view(origin, size);
+            let overlay_visible =
+                overlay_bounds.is_some_and(|(origin, size)| in_view(origin, size));
+            if !terrain_visible && !overlay_visible {
                 continue;
             }
             let tint = if (p.x + p.y) % 2 == 0 {
@@ -749,7 +778,7 @@ async fn run(options: Options, mut scene: Scene) {
             } else {
                 Color::from_rgba(60, 77, 50, 255)
             };
-            if let Some(image) = terrain_image {
+            if terrain_visible && let Some(image) = terrain_image {
                 draw_texture_ex(
                     &image.texture,
                     origin.x,
@@ -760,8 +789,23 @@ async fn run(options: Options, mut scene: Scene) {
                         ..Default::default()
                     },
                 );
-            } else {
+            } else if terrain_visible {
                 diamond(pos, 60.0 * view.zoom, 30.0 * view.zoom, tint);
+            }
+            if overlay_visible
+                && let Some(image) = overlay_image
+                && let Some((origin, size)) = overlay_bounds
+            {
+                draw_texture_ex(
+                    &image.texture,
+                    origin.x,
+                    origin.y,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(size),
+                        ..Default::default()
+                    },
+                );
             }
             if let Simulation::Battle(game) = &scene.world
                 && game.resource(p) > 0

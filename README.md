@@ -173,7 +173,7 @@ merges the matching base/MD theater INIs and chooses the appropriate **ISO palet
 It supports all six theaters in YR. Directory mode defaults to Windows-1252;
 `--encoding=utf8|windows1252|gbk` overrides map/INI decoding. Executables are not read.
 Expansion/mod archives, loose resource overrides and complete engine search-order
-compatibility are pending; this profile covers stock terrain viewing.
+compatibility are pending; this profile covers stock terrain and static overlay viewing.
 
 Explicit resources remain available for controlled experiments:
 
@@ -193,5 +193,13 @@ select the correct extension for other theaters.
 The viewer composites diamond and extra TMP graphics using their relative offsets,
 handles the map's `0xffff` clear marker and reports unresolved cells. Original
 cross-theater fallbacks retain the resolved resource's palette identity. Damaged
-and random variants, animations, lighting, Z-buffer occlusion, overlays, terrain
-passability and original gameplay remain incomplete.
+and random terrain variants, overlay animations, lighting, Z-buffer occlusion,
+terrain passability and original gameplay remain incomplete.
+
+Directory mode also draws original ore/gems, walls, bridges and other static
+overlay SHP frames. It uses the map's overlay data, rules/art Image aliases and
+theater-specific palettes, and reports missing assets and invalid frame numbers.
+Transparent helper frames are counted separately. These visuals do not implement
+mining, wall connectivity or bridge navigation. Explicit terrain mounts remain
+terrain-only. See [real-resource validation](docs/REAL_RESOURCE_VALIDATION.md) for
+the six-theater samples and the 11 remaining full-map graphics failures.
