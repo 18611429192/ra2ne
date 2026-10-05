@@ -427,3 +427,25 @@ still needs major work. No new graphical/original-resource acceptance is claimed
   75 steps from the tick-45 save reached tick 120 at `b0f9f90499dcd98c`, matching
   standalone replay and uninterrupted execution. Corrupt replay, output overwrite
   and incompatible CLI flags were rejected. Window verification remains pending.
+
+
+## 2026-10-05: real-package parsing repairs and directory audit
+
+Recovered the user-provided Ra2Game412.zip and tested its actual resources. Added
+read-only `ra2ne-inspect audit`, bounded XCC filename metadata, optional terrain
+trailers, preserved/off-grid waypoint diagnostics, TMP padding handling, correct
+SHP compression byte/format-two/empty-frame behavior and row-edge transparency.
+Rule discovery now continues through incomplete placeholders without weakening
+strict gameplay compilation; section-header slash comments are accepted.
+
+97 workspace tests, strict Clippy, formatting and Release passed. Actual audit:
+60 MIX containers (26 encrypted, 44 verified checksums), 371 maps, 5,616 SHPs /
+110,160 frames, 9,929 TMPs / 46,392 tile occurrences and 4 named palettes;
+zero failures among identified formats. Two empty MIXs, 1,586 unidentified and
+572 known-unchecked entries are explicitly separate. No original resources are
+committed. Headless map-view loading, sustained combat and TCP/replay regression
+passed; game hashes remain unchanged. Detailed reproduction, input fingerprint,
+rule-discovery results and limitations are in REAL_RESOURCE_VALIDATION.md.
+
+1.0 remains incomplete. Overall estimated feature coverage stays approximately
+25%, because parsing authentic resources does not establish original gameplay.

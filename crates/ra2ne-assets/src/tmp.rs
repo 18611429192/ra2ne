@@ -62,9 +62,9 @@ impl Tmp {
                 return Err("TMP tile header outside file");
             }
             let flags = number(&bytes, at + 36)?;
-            if flags & !7 != 0 {
-                return Err("unsupported TMP tile flags");
-            }
+            // Only the low three bitfields carry format semantics. Shipped
+            // files contain uninitialized high bits (often 0xcdcdcd..); keep
+            // the raw word for inspection without treating padding as flags.
             let range = |relative: usize, length: usize| -> Result<Range<usize>, &'static str> {
                 let start = at.checked_add(relative).ok_or("TMP data offset overflow")?;
                 let end = start.checked_add(length).ok_or("TMP data size overflow")?;
@@ -243,5 +243,16 @@ mod tests {
         let mut bad = bytes;
         bad[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(Tmp::parse(Arc::from(bad)).is_err());
+    }
+    #[test]
+    fn inactive_header_padding_is_preserved_without_changing_pixels() {
+        let mut bytes = sample();
+        bytes[56..60].copy_from_slice(&0xcdcd_cdc8_u32.to_le_bytes());
+        let parsed = Tmp::parse(Arc::from(bytes)).unwrap();
+        assert_eq!(parsed.tile(0).unwrap().flags, 0xcdcd_cdc8);
+        assert_eq!(
+            parsed.diamond(0).unwrap(),
+            Tmp::parse(Arc::from(sample())).unwrap().diamond(0).unwrap()
+        );
     }
 }

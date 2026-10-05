@@ -1,6 +1,6 @@
 # Progress toward RA2NE 1.0
 
-As of 2026-10-04: **approximately 25% complete; approximately 75% remaining**.
+As of 2026-10-05: **approximately 25% complete; approximately 75% remaining**.
 This is an engineering estimate of feature coverage, not a measured acceptance
 score, elapsed-time percentage or prediction of remaining work hours. Small
 rule additions do not automatically increase the displayed percentage.
@@ -24,3 +24,5 @@ Major remaining work:
 Verified batches and their specific limitations are recorded in STATUS.md.
 Reassess the overall estimate at substantial end-to-end milestones rather than
 counting commits or unit tests as progress points.
+
+Actual package parsing has now been checked for identified maps, SHP frames and TMP tiles; see REAL_RESOURCE_VALIDATION.md. This does not change the original gameplay acceptance status.

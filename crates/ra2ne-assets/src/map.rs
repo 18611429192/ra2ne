@@ -64,9 +64,15 @@ pub struct Ra2Map {
     pub size: MapRect,
     pub local_size: MapRect,
     pub tiles: Vec<MapTile>,
+    /// Original maps commonly append four bytes after the complete terrain
+    /// records. Preserve them without interpreting them as a partial cell.
+    pub terrain_trailer: Option<[u8; 4]>,
     pub overlays: Vec<u8>,
     pub overlay_data: Vec<u8>,
     pub waypoints: BTreeMap<u32, Cell>,
+    /// Stale/off-grid waypoint values occur in shipped multiplayer maps. They
+    /// remain available, but must not become usable navigation coordinates.
+    pub unresolved_waypoints: BTreeMap<u32, i64>,
     pub objects: Vec<MapObject>,
     pub diagnostics: Vec<MapDiagnostic>,
 }
@@ -145,14 +151,22 @@ impl Ra2Map {
                 message: format!("unsupported theater: {theater}"),
             });
         }
-        let raw = decode_section(&ini, "IsoMapPack5", PackCodec::Lzo, MAX_CELLS * 11)?
+        let raw = decode_section(&ini, "IsoMapPack5", PackCodec::Lzo, MAX_CELLS * 11 + 4)?
             .ok_or("missing IsoMapPack5 terrain data")?;
-        if raw.is_empty() || raw.len() % 11 != 0 {
+        let (records, terrain_trailer) = match raw.len() % 11 {
+            0 => (raw.as_slice(), None),
+            4 => (
+                &raw[..raw.len() - 4],
+                Some(raw[raw.len() - 4..].try_into().unwrap()),
+            ),
+            _ => return Err("IsoMapPack5 has an incomplete terrain record".into()),
+        };
+        if records.is_empty() {
             return Err("IsoMapPack5 is not a nonempty array of 11-byte cells".into());
         }
-        let mut tiles = Vec::with_capacity(raw.len() / 11);
+        let mut tiles = Vec::with_capacity(records.len() / 11);
         let mut seen = BTreeSet::new();
-        for record in raw.as_chunks::<11>().0 {
+        for record in records.as_chunks::<11>().0 {
             let x = u16::from_le_bytes(record[..2].try_into().unwrap());
             let y = u16::from_le_bytes(record[2..4].try_into().unwrap());
             if usize::from(x) >= OVERLAY_SIDE || usize::from(y) >= OVERLAY_SIDE {
@@ -181,22 +195,29 @@ impl Ra2Map {
             decode_section(&ini, "OverlayDataPack", PackCodec::Lcw, MAX_CELLS)?.unwrap_or_default();
         overlay_data.resize(MAX_CELLS, 0);
         let mut waypoints = BTreeMap::new();
+        let mut unresolved_waypoints = BTreeMap::new();
+        let mut waypoint_ids = BTreeSet::new();
         for entry in ini.section_entries("Waypoints") {
             let id: u32 = entry
                 .key
                 .parse()
                 .map_err(|_| format!("line {}: invalid waypoint ID", entry.line))?;
-            let encoded: u32 = entry
+            if !waypoint_ids.insert(id) {
+                return Err(format!("line {}: duplicate waypoint ID", entry.line));
+            }
+            let encoded: i64 = entry
                 .value
                 .parse()
                 .map_err(|_| format!("line {}: invalid waypoint cell", entry.line))?;
             let x = encoded % 1000;
             let y = encoded / 1000;
-            if x >= OVERLAY_SIDE as u32 || y >= OVERLAY_SIDE as u32 {
-                return Err(format!(
-                    "line {}: waypoint outside map coordinate space",
-                    entry.line
-                ));
+            if encoded < 0 || x >= OVERLAY_SIDE as i64 || y >= OVERLAY_SIDE as i64 {
+                unresolved_waypoints.insert(id, encoded);
+                diagnostics.push(MapDiagnostic {
+                    section: "Waypoints".into(), line: entry.line,
+                    message: format!("off-grid waypoint {id}={encoded} preserved; excluded from usable coordinates"),
+                });
+                continue;
             }
             if waypoints
                 .insert(
@@ -262,9 +283,11 @@ impl Ra2Map {
             size,
             local_size,
             tiles,
+            terrain_trailer,
             overlays,
             overlay_data,
             waypoints,
+            unresolved_waypoints,
             objects,
             diagnostics,
         })
@@ -346,7 +369,10 @@ mod tests {
     use base64::{Engine, engine::general_purpose::STANDARD};
     fn sample() -> String {
         let raw = [2, 0, 3, 0, 42, 0, 0, 0, 1, 4, 0];
-        let compressed = lzokay::compress::compress(&raw).unwrap();
+        sample_with_raw(&raw)
+    }
+    fn sample_with_raw(raw: &[u8]) -> String {
+        let compressed = lzokay::compress::compress(raw).unwrap();
         let mut packed = Vec::new();
         packed.extend((compressed.len() as u16).to_le_bytes());
         packed.extend((raw.len() as u16).to_le_bytes());
@@ -355,6 +381,22 @@ mod tests {
             "[Basic]\nName=Synthetic\n[Map]\nSize=0,0,10,10\nLocalSize=1,1,8,8\nTheater=TEMPERATE\n[IsoMapPack5]\n1={}\n[Waypoints]\n0=3002\n[Units]\n0=Americans,TANK,256,2,3,64,Guard,None,0,0\n[Infantry]\n0=Americans,SOLDIER,128,2,3,1,Guard,32,None\n[Structures]\n0=Americans,FACTORY,256,2,3,0,None\n[Triggers]\nT=opaque trigger\n",
             STANDARD.encode(packed)
         )
+    }
+    #[test]
+    fn original_style_four_byte_trailer_is_preserved_without_creating_a_cell() {
+        let record = [2, 0, 3, 0, 42, 0, 0, 0, 1, 4, 0];
+        let mut raw = record.to_vec();
+        raw.extend([1, 2, 3, 4]);
+        let map = Ra2Map::parse(&sample_with_raw(&raw)).unwrap();
+        assert_eq!(map.tiles, Ra2Map::parse(&sample()).unwrap().tiles);
+        assert_eq!(map.terrain_trailer, Some([1, 2, 3, 4]));
+        assert_eq!(Ra2Map::parse(&sample()).unwrap().terrain_trailer, None);
+        for extra in [1, 2, 3, 5, 6, 7, 8, 9, 10] {
+            let mut malformed = record.to_vec();
+            malformed.resize(11 + extra, 0);
+            assert!(Ra2Map::parse(&sample_with_raw(&malformed)).is_err());
+        }
+        assert!(Ra2Map::parse(&sample_with_raw(&[0; 4])).is_err());
     }
     #[test]
     fn map_preserves_terrain_objects_waypoints_and_unsupported_sections() {
@@ -386,12 +428,26 @@ mod tests {
         for (from, to) in [
             ("0,0,10,10", "0,0,0,10"),
             ("1,1,8,8", "9,9,8,8"),
-            ("0=3002", "0=999999"),
+            ("0=3002", "0=not-a-cell"),
             ("TANK,256", "TANK,257"),
             ("SOLDIER,128,2,3,1", "SOLDIER,128,2,3,6"),
         ] {
             assert!(Ra2Map::parse(&text.replace(from, to)).is_err(), "{to}");
         }
         assert!(Ra2Map::parse("[Map]\nSize=0,0,10,10\nTheater=SNOW\n").is_err());
+    }
+    #[test]
+    fn stale_waypoints_are_preserved_but_never_used_as_cells() {
+        let text = sample().replace("0=3002", "0=3002\n49=-905\n149=93996");
+        let map = Ra2Map::parse(&text).unwrap();
+        assert_eq!(map.waypoints.len(), 1);
+        assert_eq!(map.unresolved_waypoints[&49], -905);
+        assert_eq!(map.unresolved_waypoints[&149], 93996);
+        assert!(
+            map.diagnostics
+                .iter()
+                .any(|d| d.section == "Waypoints" && d.line > 0)
+        );
+        assert!(Ra2Map::parse(&text.replace("149=93996", "49=3002")).is_err());
     }
 }

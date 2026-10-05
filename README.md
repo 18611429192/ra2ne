@@ -64,9 +64,9 @@ Synthetic asset frontend smoke check (no original assets required):
 cargo run -p ra2ne-bench --release -- --asset-check
 ```
 
-The INI frontend supports explicit UTF-8, Windows-1252 and GBK decoding, semicolon comments, repeated
+The INI frontend supports explicit UTF-8, Windows-1252 and GBK decoding, semicolon comments, section-header slash comments, repeated
 sections and last-value duplicate lookup. Registry entries retain source order.
-These are provisional frontend semantics pending original-game fixtures.
+Whole-game semantics remain pending even where real-resource parsing has now been checked.
 VFS mounts replace whole files; the rules loader merges individual INI keys.
 An [experimental gameplay bridge](docs/RULE_EXPERIMENT.md) applies a subset of
 unit/weapon properties with explicit movement and timing calibration. Original
@@ -75,11 +75,14 @@ gameplay and ordinary MOD compatibility remain unverified.
 Inspect your own resource files without modifying them:
 
 ```bash
+cargo run -p ra2ne-inspect --release -- audit /path/to/game-directory
 cargo run -p ra2ne-inspect --release -- ini /path/to/rulesmd.ini --encoding=gbk
 cargo run -p ra2ne-inspect --release -- mix /path/to/ra2md.mix
 cargo run -p ra2ne-inspect --release -- mix /path/to/ra2md.mix --nested=localmd.mix --file=rulesmd.ini
 cargo run -p ra2ne-bench --release -- --mix-check
 ```
+
+The read-only audit recursively checks detected MIX containers, maps, SHP frames and TMP tiles, and reports unchecked/unidentified entries. It is resource parsing coverage, not original gameplay acceptance. See [real-resource verification](docs/REAL_RESOURCE_VALIDATION.md).
 
 Nested names depend on the actual archive. No archive extraction is needed for
 inspection. [Format notes](docs/FORMAT_NOTES.md) record supported variants and
@@ -92,6 +95,8 @@ cargo run -p ra2ne-inspect --release -- map /path/to/map.mpr
 cargo run -p ra2ne-inspect --release -- rules /path/to/rulesmd.ini --overlay=/path/to/map.mpr
 cargo run -p ra2ne-bench --release -- --rules-check
 ```
+
+Rule inspection discovers valid definitions alongside explicit incomplete type/weapon diagnostics. It does not fabricate missing defaults; the experimental gameplay importer still uses strict compilation.
 
 Map/INI inspection reports pending runtime features. It does not launch a game
 or certify that original maps and MODs already run correctly.

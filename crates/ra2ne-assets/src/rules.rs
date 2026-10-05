@@ -122,10 +122,21 @@ impl RuleSet {
     pub fn layers(&self) -> &[RuleLayer] {
         &self.layers
     }
+    /// Strict compilation remains available for the experimental game importer.
     pub fn load(&self) -> Result<RuleCatalog, String> {
+        self.load_mode(false)
+    }
+    /// Inspect the whole source even when some registered placeholders cannot
+    /// compile. No health/weapon defaults are invented; failures remain explicit.
+    pub fn discover(&self) -> Result<RuleCatalog, String> {
+        self.load_mode(true)
+    }
+    fn load_mode(&self, discovery: bool) -> Result<RuleCatalog, String> {
         let mut types = Vec::new();
         let mut ids = BTreeSet::new();
         let mut diagnostics = Vec::new();
+        let mut incomplete_types = Vec::new();
+        let mut incomplete_weapons = Vec::new();
         for layer in &self.layers {
             for d in &layer.ini.diagnostics {
                 diagnostics.push(RuleDiagnostic {
@@ -152,52 +163,73 @@ impl RuleSet {
                     ));
                 }
                 if !ids.insert(id.to_ascii_lowercase()) {
+                    if discovery {
+                        diagnostics.push(RuleDiagnostic {
+                            source: value.source.to_owned(), line: value.entry.line,
+                            section: registry.to_owned(), key: value.entry.key.clone(),
+                            message: format!("duplicate registered type {id}; first registry position retained for discovery"),
+                        });
+                        continue;
+                    }
                     return Err(format!(
                         "{}:{}: duplicate registered type {id}",
                         value.source, value.entry.line
                     ));
                 }
-                let strength = required_integer(self, id, "Strength")?;
-                if strength <= 0 {
-                    return Err(format!("{id}: Strength must be positive"));
+                let parsed = (|| -> Result<TypeRule, String> {
+                    let strength = required_integer(self, id, "Strength")?;
+                    if strength <= 0 {
+                        return Err(format!("{id}: Strength must be positive"));
+                    }
+                    let speed = optional_integer(self, id, "Speed", 0)?;
+                    if speed < 0 {
+                        return Err(format!("{id}: negative Speed"));
+                    }
+                    let sight = optional_decimal(self, id, "Sight", FixedDecimal(0))?;
+                    if sight.0 < 0 {
+                        return Err(format!("{id}: negative Sight"));
+                    }
+                    let primary = optional_string(self, id, "Primary");
+                    let secondary = optional_string(self, id, "Secondary");
+                    let prerequisites = self
+                        .get(id, "Prerequisite")
+                        .map_or_else(Vec::new, |v| v.entry.list().map(str::to_owned).collect());
+                    let owners = self
+                        .get(id, "Owner")
+                        .map_or_else(Vec::new, |v| v.entry.list().map(str::to_owned).collect());
+                    let properties = self
+                        .section(id)
+                        .into_iter()
+                        .map(|v| (v.entry.key.to_ascii_lowercase(), v.entry.value.clone()))
+                        .collect();
+                    Ok(TypeRule {
+                        id: id.to_owned(),
+                        kind,
+                        strength: strength as u32,
+                        speed: speed as u32,
+                        cost: optional_integer(self, id, "Cost", 0)?,
+                        sight,
+                        primary,
+                        secondary,
+                        prerequisites,
+                        owners,
+                        image: optional_string(self, id, "Image"),
+                        name: optional_string(self, id, "Name"),
+                        armor: optional_string(self, id, "Armor"),
+                        properties,
+                    })
+                })();
+                match parsed {
+                    Ok(unit) => types.push(unit),
+                    Err(message) if discovery => incomplete_types.push(RuleDiagnostic {
+                        source: value.source.to_owned(),
+                        line: value.entry.line,
+                        section: id.to_owned(),
+                        key: String::new(),
+                        message,
+                    }),
+                    Err(message) => return Err(message),
                 }
-                let speed = optional_integer(self, id, "Speed", 0)?;
-                if speed < 0 {
-                    return Err(format!("{id}: negative Speed"));
-                }
-                let sight = optional_decimal(self, id, "Sight", FixedDecimal(0))?;
-                if sight.0 < 0 {
-                    return Err(format!("{id}: negative Sight"));
-                }
-                let primary = optional_string(self, id, "Primary");
-                let secondary = optional_string(self, id, "Secondary");
-                let prerequisites = self
-                    .get(id, "Prerequisite")
-                    .map_or_else(Vec::new, |v| v.entry.list().map(str::to_owned).collect());
-                let owners = self
-                    .get(id, "Owner")
-                    .map_or_else(Vec::new, |v| v.entry.list().map(str::to_owned).collect());
-                let properties = self
-                    .section(id)
-                    .into_iter()
-                    .map(|v| (v.entry.key.to_ascii_lowercase(), v.entry.value.clone()))
-                    .collect();
-                types.push(TypeRule {
-                    id: id.to_owned(),
-                    kind,
-                    strength: strength as u32,
-                    speed: speed as u32,
-                    cost: optional_integer(self, id, "Cost", 0)?,
-                    sight,
-                    primary,
-                    secondary,
-                    prerequisites,
-                    owners,
-                    image: optional_string(self, id, "Image"),
-                    name: optional_string(self, id, "Name"),
-                    armor: optional_string(self, id, "Armor"),
-                    properties,
-                });
                 collect_unknown(
                     self,
                     id,
@@ -225,23 +257,53 @@ impl RuleSet {
                 if weapons.contains_key(&key) {
                     continue;
                 }
-                let damage = required_integer(self, id, "Damage")?;
-                let rof = required_integer(self, id, "ROF")?;
-                let range = optional_decimal(self, id, "Range", FixedDecimal(0))?;
-                if rof < 0 || range.0 < 0 {
-                    return Err(format!("{id}: negative ROF or Range"));
+                if incomplete_weapons
+                    .iter()
+                    .any(|d: &RuleDiagnostic| d.section.eq_ignore_ascii_case(id))
+                {
+                    continue;
                 }
-                weapons.insert(
-                    key,
-                    WeaponRule {
+                let parsed = (|| -> Result<WeaponRule, String> {
+                    let damage = required_integer(self, id, "Damage")?;
+                    let rof = required_integer(self, id, "ROF")?;
+                    let range = optional_decimal(self, id, "Range", FixedDecimal(0))?;
+                    if rof < 0 || range.0 < 0 {
+                        return Err(format!("{id}: negative ROF or Range"));
+                    }
+                    Ok(WeaponRule {
                         id: id.clone(),
                         damage,
                         rof: rof as u32,
                         range,
                         warhead: optional_string(self, id, "Warhead"),
                         projectile: optional_string(self, id, "Projectile"),
-                    },
-                );
+                    })
+                })();
+                match parsed {
+                    Ok(weapon) => {
+                        weapons.insert(key, weapon);
+                    }
+                    Err(message) if discovery => {
+                        let key = if unit
+                            .primary
+                            .as_ref()
+                            .is_some_and(|primary| primary.eq_ignore_ascii_case(id))
+                        {
+                            "Primary"
+                        } else {
+                            "Secondary"
+                        };
+                        let reference = self.get(&unit.id, key).unwrap();
+                        incomplete_weapons.push(RuleDiagnostic {
+                            source: reference.source.to_owned(),
+                            line: reference.entry.line,
+                            section: id.to_owned(),
+                            key: String::new(),
+                            message,
+                        });
+                    }
+                    Err(message) => return Err(message),
+                }
                 collect_unknown(
                     self,
                     id,
@@ -295,6 +357,9 @@ impl RuleSet {
             weapons,
             diagnostics,
             type_index,
+            registered_type_count: ids.len(),
+            incomplete_types,
+            incomplete_weapons,
         })
     }
 }
@@ -394,6 +459,9 @@ pub struct RuleDiagnostic {
 }
 #[derive(Debug)]
 pub struct RuleCatalog {
+    pub registered_type_count: usize,
+    pub incomplete_types: Vec<RuleDiagnostic>,
+    pub incomplete_weapons: Vec<RuleDiagnostic>,
     pub types: Vec<TypeRule>,
     pub weapons: BTreeMap<String, WeaponRule>,
     pub diagnostics: Vec<RuleDiagnostic>,
@@ -476,5 +544,32 @@ mod tests {
             rules.add_layer("bad.ini", text).unwrap();
             assert!(rules.load().is_err());
         }
+    }
+    #[test]
+    fn discovery_keeps_valid_types_while_reporting_placeholders_and_bad_weapons() {
+        let mut rules = RuleSet::default();
+        rules.add_layer("fixture.ini", "[VehicleTypes]\n0=TANK\n1=DUMMY\n2=tank\n[TANK]\nStrength=100\nPrimary=GUN\nSecondary=BAD\n[DUMMY]\nPrimary=MISSING\n[GUN]\nDamage=20\nROF=10\nRange=5\n[BAD]\nDamage=5\n").unwrap();
+        assert!(rules.load().is_err());
+        let discovered = rules.discover().unwrap();
+        assert_eq!(discovered.registered_type_count, 2);
+        assert_eq!(discovered.types.len(), 1);
+        assert_eq!(discovered.type_by_id("tank").unwrap().strength, 100);
+        assert!(discovered.type_by_id("dummy").is_none());
+        assert_eq!(discovered.incomplete_types.len(), 1);
+        assert_eq!(discovered.incomplete_types[0].section, "DUMMY");
+        assert_eq!(discovered.incomplete_weapons.len(), 1);
+        assert_eq!(discovered.incomplete_weapons[0].section, "BAD");
+        assert_eq!(
+            discovered.incomplete_weapons[0].line,
+            rules.get("TANK", "Secondary").unwrap().entry.line
+        );
+        assert!(
+            discovered
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("duplicate registered"))
+        );
+        assert!(rules.get("DUMMY", "Primary").is_some());
+        assert_eq!(discovered.weapons.len(), 1);
     }
 }

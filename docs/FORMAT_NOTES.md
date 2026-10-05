@@ -30,10 +30,10 @@ that padded string. Early C&C/RA uses a distinct rotate-add hash; callers
 select the algorithm explicitly, since the header alone is insufficient.
 
 An archive does not inherently store recoverable filenames. Known names can be
-looked up directly; raw inspection lists IDs and sizes. XCC name databases,
-automatic game identification and automatic nested-mount discovery remain
-pending. Nested MIX inspection currently follows explicit names, maximum depth
-eight. Within-archive duplicate IDs are rejected as ambiguous. Overlapping byte
+looked up directly; raw inspection lists IDs and sizes. Optional XCC local name
+databases are bounded and decoded. The audit discovers nested containers by
+structure; explicit-name nested inspection is also available, maximum depth
+eight. Original gameplay mount-priority policy remains pending. Within-archive duplicate IDs are rejected as ambiguous. Overlapping byte
 ranges are allowed because entries may alias shared data. Entire declared body
 and optional checksum must match the supplied archive slice exactly.
 
@@ -156,3 +156,31 @@ into OR-within/AND-between groups. Base lists must be explicit in source data;
 original defaults are not fabricated. PROC vehicle alternates and other enhanced
 prerequisite behavior remain pending. v5 persists group boundaries and bounds
 total member allocations during decoding, before accepting game state.
+
+
+## Real-package parsing refinements
+
+Actual maps can end their terrain arrays with four extra bytes. The frontend
+preserves this trailer separately; incomplete records of other lengths still
+fail. Off-grid numeric waypoints are kept with diagnostics outside the usable
+coordinate map. This enables inspection without inventing usable paths.
+
+TMP flag words interpret only their three documented low bitfields. Unused high
+bits and inactive metadata occur as uninitialized debug-fill values in actual
+resources. They are retained, while active offsets/dimensions remain checked.
+
+SHP uses the low format byte: 0/1 raw pixels, 2 stored-length raw rows, 3
+length-prefixed transparent-run rows. Empty frame flags are ignored; nonempty
+frames remain bounded. Final transparent runs clamp to row width, while literal
+overruns still fail. See the independently consulted
+[OpenRA SHP reader](https://github.com/OpenRA/OpenRA/blob/bleed/OpenRA.Mods.Common/SpriteLoaders/ShpTSLoader.cs)
+and the [EA/XCC row decoder](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/3rdParty/xcc/misc/shp_decode.cpp).
+No source code from these references is copied.
+
+XCC local filename metadata contains a 32-byte signature, size/type/version,
+game/count and NUL-terminated names. Size/count/name bounds and canonical names
+are validated. It is optional archive metadata, not a requirement for named MIX
+lookup and not authorization to extract paths. The audit preserves unknown entry
+coverage instead of inferring complete resource/gameplay support.
+
+See REAL_RESOURCE_VALIDATION.md for real-package checks and remaining limits.

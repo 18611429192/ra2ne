@@ -6,6 +6,7 @@ use ra2ne_assets::{
     text::TextEncoding,
 };
 use std::{env, fs::File, io::Read, process::ExitCode, sync::Arc};
+mod audit;
 
 fn read_bounded(path: &str, limit: usize) -> Result<Vec<u8>, String> {
     let file = File::open(path).map_err(|e| format!("{path}: {e}"))?;
@@ -59,7 +60,13 @@ fn map_report(bytes: &[u8], encoding: TextEncoding) -> Result<(), String> {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.len() < 2 {
-        return Err("usage: ra2ne-inspect ini|map|rules|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk] [--overlay=PATH]".into());
+        return Err("usage: ra2ne-inspect audit|ini|map|rules|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk] [--overlay=PATH]".into());
+    }
+    if args[0] == "audit" {
+        if args.len() != 2 {
+            return Err("usage: ra2ne-inspect audit GAME_DIRECTORY|RESOURCE_FILE".into());
+        }
+        return audit::run(&args[1]);
     }
     let mut file_name = None;
     let mut nested = None;
@@ -105,13 +112,26 @@ fn run() -> Result<(), String> {
                 let text = encoding.decode(&bytes)?;
                 rules.add_layer(path, &text)?;
             }
-            let catalog = rules.load()?;
+            let catalog = rules.discover()?;
             println!(
-                "rule_types={}; weapons={}; diagnostics={}",
+                "registered_types={}; rule_types={}; weapons={}; incomplete_types={}; incomplete_weapons={}; diagnostics={}",
+                catalog.registered_type_count,
                 catalog.types.len(),
                 catalog.weapons.len(),
+                catalog.incomplete_types.len(),
+                catalog.incomplete_weapons.len(),
                 catalog.diagnostics.len()
             );
+            for d in catalog
+                .incomplete_types
+                .iter()
+                .chain(&catalog.incomplete_weapons)
+            {
+                println!(
+                    "source={}; line={}; section={}; incomplete={}",
+                    d.source, d.line, d.section, d.message
+                );
+            }
             for d in catalog.diagnostics.iter().take(100) {
                 println!(
                     "source={}; line={}; section={}; key={}; diagnostic={}",
@@ -165,7 +185,7 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        _ => return Err("mode must be ini, map, rules or mix".into()),
+        _ => return Err("mode must be audit, ini, map, rules or mix".into()),
     }
     Ok(())
 }

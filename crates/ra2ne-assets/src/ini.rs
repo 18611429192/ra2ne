@@ -23,7 +23,8 @@ pub struct Ini {
 }
 impl Ini {
     /// UTF-8/ASCII input only for now. Legacy codepage decoding belongs before
-    /// this stage. Semicolon starts a comment; values are otherwise literal.
+    /// this stage. Semicolon starts a comment; standalone and section-header //
+    /// annotations are accepted without stripping // from values.
     /// Repeated sections merge, duplicate keys use the last value for lookup,
     /// while every original entry remains in source order for list processing.
     pub fn parse(text: &str) -> Result<Self, &'static str> {
@@ -35,10 +36,19 @@ impl Ini {
         for (index, raw) in text.trim_start_matches('\u{feff}').lines().enumerate() {
             let line = index + 1;
             let text = raw.split(';').next().unwrap().trim();
-            if text.is_empty() {
+            if text.is_empty() || text.starts_with("//") {
                 continue;
             }
             if text.starts_with('[') {
+                // Original rules include [Section] // trailing annotations.
+                // Do not strip // from values such as HTTP URLs or file names.
+                let text = text.split_once(']').map_or(text, |(name, tail)| {
+                    if tail.trim_start().starts_with("//") {
+                        &text[..name.len() + 1]
+                    } else {
+                        text
+                    }
+                });
                 if !text.ends_with(']')
                     || text.len() <= 2
                     || text[1..text.len() - 1].contains(['[', ']'])
@@ -176,5 +186,16 @@ mod tests {
         assert!(ini.get("Next", "n").unwrap().integer().is_err());
         assert!(ini.get("Next", "b").unwrap().boolean().is_err());
         assert!(Ini::parse("\0").is_err());
+    }
+    #[test]
+    fn section_slash_comments_do_not_discard_values_or_relax_broken_headers() {
+        let ini = Ini::parse("// note\n[Heat] // annotation\nDamage=30\nURL=https://example.invalid/path\n[Broken] garbage\nx=9\n[Next]\ny=7").unwrap();
+        assert_eq!(ini.get("Heat", "Damage").unwrap().integer(), Ok(30));
+        assert_eq!(
+            ini.get("Heat", "URL").unwrap().value,
+            "https://example.invalid/path"
+        );
+        assert!(ini.get("Heat", "x").is_none());
+        assert_eq!(ini.diagnostics.len(), 2);
     }
 }

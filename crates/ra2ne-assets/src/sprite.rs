@@ -83,14 +83,16 @@ impl Shp {
             let y = word(&bytes, at + 2)?;
             let w = word(&bytes, at + 4)?;
             let h = word(&bytes, at + 6)?;
-            let compression = dword(&bytes, at + 8)?;
+            // The format occupies one byte; the other three bytes are not
+            // additional compression flags and need not be initialized.
+            let compression = u32::from(bytes[at + 8]);
             let offset = dword(&bytes, at + 20)? as usize;
-            if dword(&bytes, at + 16)? != 0 || compression > 3 {
-                return Err("unsupported SHP frame flags");
-            }
             if w == 0 && h == 0 && offset == 0 {
                 headers.push((x, y, w, h, compression, offset));
                 continue;
+            }
+            if dword(&bytes, at + 16)? != 0 || compression > 3 {
+                return Err("unsupported SHP frame flags");
             }
             if w == 0
                 || h == 0
@@ -150,10 +152,10 @@ impl Shp {
             return Ok(image);
         }
         let data = &self.bytes[frame.data.clone()];
-        let decoded = if frame.compression & 2 != 0 {
-            decode_rows(data, frame.width, frame.height)?
-        } else {
-            data[..usize::from(frame.width) * usize::from(frame.height)].to_vec()
+        let decoded = match frame.compression {
+            3 => decode_rows(data, frame.width, frame.height)?,
+            2 => decode_uncompressed_rows(data, frame.width, frame.height)?,
+            _ => data[..usize::from(frame.width) * usize::from(frame.height)].to_vec(),
         };
         for row in 0..usize::from(frame.height) {
             let at = (usize::from(frame.y) + row) * usize::from(self.width) + usize::from(frame.x);
@@ -163,6 +165,28 @@ impl Shp {
         }
         Ok(image)
     }
+}
+fn decode_uncompressed_rows(
+    bytes: &[u8],
+    width: u16,
+    height: u16,
+) -> Result<Vec<u8>, &'static str> {
+    let length = usize::from(word(bytes, 0)?)
+        .checked_sub(2)
+        .ok_or("SHP row length smaller than prefix")?;
+    if length > usize::from(width) {
+        return Err("SHP row exceeds frame width");
+    }
+    let mut out = vec![0; usize::from(width) * usize::from(height)];
+    for row in 0..usize::from(height) {
+        let start = 2 + row * length;
+        let data = bytes
+            .get(start..start + length)
+            .ok_or("truncated raw SHP rows")?;
+        let dest = row * usize::from(width);
+        out[dest..dest + length].copy_from_slice(data);
+    }
+    Ok(out)
 }
 fn decode_rows(mut bytes: &[u8], width: u16, height: u16) -> Result<Vec<u8>, &'static str> {
     let mut out = Vec::with_capacity(usize::from(width) * usize::from(height));
@@ -178,10 +202,11 @@ fn decode_rows(mut bytes: &[u8], width: u16, height: u16) -> Result<Vec<u8>, &'s
             if value == 0 {
                 let (&count, tail) = row.split_first().ok_or("truncated SHP transparent run")?;
                 row = tail;
-                if count == 0 || out.len() - start + usize::from(count) > usize::from(width) {
-                    return Err("invalid SHP transparent run");
-                }
-                out.resize(out.len() + usize::from(count), 0);
+                let remaining = usize::from(width) - (out.len() - start);
+                // Original SHP encoders can overrun the right edge with a final
+                // transparent run. Clamp that run as the reference reader does;
+                // subsequent literal pixels still cannot write outside the row.
+                out.resize(out.len() + usize::from(count).min(remaining), 0);
             } else {
                 if out.len() - start >= usize::from(width) {
                     return Err("SHP row exceeds frame width");
@@ -261,11 +286,60 @@ mod tests {
             assert!(Shp::parse(Arc::from(&bytes[..n])).is_err());
         }
         let mut bytes = fixture(true);
-        *bytes.last_mut().unwrap() = 3;
+        bytes[32..34].copy_from_slice(&4_u16.to_le_bytes());
         assert!(Shp::parse(Arc::from(bytes)).unwrap().frame(0).is_err());
         let mut bytes = vec![0; 768];
         bytes[0] = 64;
         assert!(Palette::parse(&bytes).is_err());
         assert!(decode_rows(&[1, 0], 1, 1).is_err());
+    }
+    #[test]
+    fn compression_byte_ignores_padding_and_rle_clamps_final_transparency() {
+        let mut bytes = fixture(true);
+        bytes[17..20].fill(0xcd);
+        *bytes.last_mut().unwrap() = 255;
+        let decoded = Shp::parse(Arc::from(bytes)).unwrap().frame(0).unwrap();
+        assert_eq!(
+            decoded,
+            Shp::parse(Arc::from(fixture(false)))
+                .unwrap()
+                .frame(0)
+                .unwrap()
+        );
+        assert!(decode_rows(&[6, 0, 7, 0, 255, 8], 2, 1).is_err());
+        assert!(decode_rows(&[4, 0, 7, 0], 2, 1).is_err());
+    }
+    #[test]
+    fn format_two_is_length_prefixed_raw_data_not_rle() {
+        let mut bytes = fixture(false);
+        bytes[16] = 2;
+        bytes.truncate(32);
+        bytes.extend([4, 0, 7, 0]);
+        let decoded = Shp::parse(Arc::from(bytes)).unwrap().frame(0).unwrap();
+        assert_eq!(
+            decoded,
+            Shp::parse(Arc::from(fixture(false)))
+                .unwrap()
+                .frame(0)
+                .unwrap()
+        );
+        assert_eq!(
+            decode_uncompressed_rows(&[4, 0, 7, 0, 0, 9], 3, 2).unwrap(),
+            vec![7, 0, 0, 0, 9, 0]
+        );
+        assert!(decode_uncompressed_rows(&[5, 0, 1, 2, 3], 2, 1).is_err());
+        assert!(decode_uncompressed_rows(&[4, 0, 1], 2, 1).is_err());
+    }
+    #[test]
+    fn empty_frames_ignore_unused_flags_but_nonempty_ones_validate_them() {
+        let mut bytes = fixture(false);
+        bytes[8..16].fill(0);
+        bytes[16..28].fill(0xcd);
+        bytes[28..32].fill(0);
+        let empty = Shp::parse(Arc::from(bytes)).unwrap().frame(0).unwrap();
+        assert!(empty.pixels.iter().all(|&p| p == 0));
+        let mut invalid = fixture(false);
+        invalid[16] = 4;
+        assert!(Shp::parse(Arc::from(invalid)).is_err());
     }
 }

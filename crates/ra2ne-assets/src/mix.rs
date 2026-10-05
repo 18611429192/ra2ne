@@ -71,6 +71,12 @@ pub struct MixArchive {
     pub checksum_verified: bool,
 }
 impl MixArchive {
+    /// XCC's optional filename metadata. MIX lookup itself never depends on it.
+    pub fn local_names(&self) -> Result<Option<LocalNameDatabase>, &'static str> {
+        self.get("local mix database.dat", FilenameHash::Ra2)?
+            .map(LocalNameDatabase::parse)
+            .transpose()
+    }
     pub fn parse(bytes: Arc<[u8]>) -> Result<Self, &'static str> {
         if bytes.len() < 6 || bytes.len() > MAX_ARCHIVE_BYTES {
             return Err("invalid MIX length");
@@ -167,6 +173,50 @@ impl MixArchive {
         Ok(self.get_id(filename_id(name, kind)?))
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct LocalNameDatabase {
+    pub game: u32,
+    pub names: Vec<String>,
+}
+impl LocalNameDatabase {
+    pub fn parse(bytes: &[u8]) -> Result<Self, &'static str> {
+        const MAGIC: &[u8] = b"XCC by Olaf van der Spek\x1a\x04\x17\x27\x10\x19\x80\x00";
+        if bytes.len() < 52 || bytes.len() > 16 * 1024 * 1024 || bytes.get(..32) != Some(MAGIC) {
+            return Err("invalid XCC local name database header");
+        }
+        if u32_at(bytes, 32)? as usize != bytes.len()
+            || u32_at(bytes, 36)? != 0
+            || u32_at(bytes, 40)? != 0
+        {
+            return Err("unsupported XCC database size/type/version");
+        }
+        let game = u32_at(bytes, 44)?;
+        let count = u32_at(bytes, 48)? as usize;
+        if count > 65_535 {
+            return Err("XCC filename count exceeds MIX limit");
+        }
+        let mut tail = &bytes[52..];
+        let mut names = Vec::with_capacity(count);
+        for _ in 0..count {
+            let end = tail
+                .iter()
+                .position(|&b| b == 0)
+                .ok_or("unterminated XCC filename")?;
+            if end == 0 || end > 1024 || !tail[..end].is_ascii() {
+                return Err("invalid XCC filename");
+            }
+            let name = std::str::from_utf8(&tail[..end]).unwrap();
+            crate::vfs::canonical_name(name)?;
+            names.push(name.to_owned());
+            tail = &tail[end + 1..];
+        }
+        if !tail.is_empty() {
+            return Err("trailing XCC filename data");
+        }
+        Ok(Self { game, names })
+    }
+}
 fn u16_at(bytes: &[u8], at: usize) -> Result<u16, &'static str> {
     Ok(u16::from_le_bytes(
         bytes
@@ -213,6 +263,34 @@ fn derive_key(source: &[u8]) -> Result<[u8; 56], &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn xcc_filename_metadata_is_bounded_and_never_becomes_a_disk_path() {
+        let mut bytes = b"XCC by Olaf van der Spek\x1a\x04\x17\x27\x10\x19\x80\x00".to_vec();
+        for value in [0_u32, 0, 0, 5, 2] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(b"Tank.SHP\x00local.mix\x00");
+        let length = bytes.len() as u32;
+        bytes[32..36].copy_from_slice(&length.to_le_bytes());
+        let names = LocalNameDatabase::parse(&bytes).unwrap();
+        assert_eq!(names.game, 5);
+        assert_eq!(names.names, ["Tank.SHP", "local.mix"]);
+        for n in 0..bytes.len() {
+            assert!(LocalNameDatabase::parse(&bytes[..n]).is_err());
+        }
+        let mut bad = bytes.clone();
+        bad[48..52].copy_from_slice(&65_536_u32.to_le_bytes());
+        assert!(LocalNameDatabase::parse(&bad).is_err());
+        let mut bad = bytes.clone();
+        bad[40] = 1;
+        assert!(LocalNameDatabase::parse(&bad).is_err());
+        let mut bad = bytes.clone();
+        bad[52..60].copy_from_slice(b"../x.shp");
+        assert!(LocalNameDatabase::parse(&bad).is_err());
+        let mut bad = bytes;
+        *bad.last_mut().unwrap() = b'x';
+        assert!(LocalNameDatabase::parse(&bad).is_err());
+    }
     use blowfish::cipher::BlockEncrypt;
     fn fixture(legacy: bool, flags: u32) -> Vec<u8> {
         let payload = b"[General]\nName=Synthetic\n";
