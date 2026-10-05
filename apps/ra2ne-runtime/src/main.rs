@@ -10,6 +10,7 @@ mod production_ui;
 mod rule_scenario;
 mod session;
 mod terrain;
+mod vehicles;
 use battle::Simulation;
 use macroquad::prelude::*;
 use ra2ne_assets::{
@@ -430,6 +431,9 @@ impl Scene {
             if let Some(overlays) = &terrain.overlays {
                 messages.push(overlays.statistics.report());
             }
+            if let Some(vehicles) = &terrain.vehicles {
+                messages.push(vehicles.report());
+            }
             if let Some(infantry) = &terrain.infantry {
                 messages.push(infantry.report());
             }
@@ -580,6 +584,12 @@ async fn run(options: Options, mut scene: Scene) {
         .as_ref()
         .and_then(|t| t.scenery.as_ref())
         .map(overlays::Scene::textures)
+        .unwrap_or_default();
+    let vehicle_textures = scene
+        .terrain
+        .as_ref()
+        .and_then(|t| t.vehicles.as_ref())
+        .map(vehicles::Scene::textures)
         .unwrap_or_default();
     let infantry_textures = scene
         .terrain
@@ -860,7 +870,14 @@ async fn run(options: Options, mut scene: Scene) {
                     .terrain
                     .as_ref()
                     .and_then(|t| t.infantry.as_ref())
-                    .and_then(|i| i.texture(id, &infantry_textures));
+                    .and_then(|i| i.texture(id, &infantry_textures))
+                    .or_else(|| {
+                        scene
+                            .terrain
+                            .as_ref()
+                            .and_then(|t| t.vehicles.as_ref())
+                            .and_then(|v| v.texture(id, &vehicle_textures))
+                    });
                 let visible = if let Some((texture, offset)) = infantry_image {
                     let origin = p + vec2(offset.0 as f32, offset.1 as f32) * view.zoom;
                     let size = vec2(texture.width(), texture.height()) * view.zoom;
@@ -907,7 +924,14 @@ async fn run(options: Options, mut scene: Scene) {
                 .terrain
                 .as_ref()
                 .and_then(|t| t.infantry.as_ref())
-                .and_then(|i| i.texture(*id, &infantry_textures));
+                .and_then(|i| i.texture(*id, &infantry_textures))
+                .or_else(|| {
+                    scene
+                        .terrain
+                        .as_ref()
+                        .and_then(|t| t.vehicles.as_ref())
+                        .and_then(|v| v.texture(*id, &vehicle_textures))
+                });
             if let Some((texture, offset)) = infantry_image {
                 draw_texture_ex(
                     texture,

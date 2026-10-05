@@ -68,6 +68,7 @@ pub struct Terrain {
     pub report: String,
     pub overlays: Option<super::overlays::Scene>,
     pub scenery: Option<super::overlays::Scene>,
+    pub vehicles: Option<super::vehicles::Scene>,
     pub infantry: Option<super::infantry::Scene>,
 }
 impl Terrain {
@@ -133,6 +134,17 @@ impl Terrain {
         };
         let infantry = if options.game_dir.is_some() {
             Some(super::infantry::Scene::load(
+                &files,
+                map,
+                map_text,
+                options.edition.unwrap(),
+                encoding,
+            )?)
+        } else {
+            None
+        };
+        let vehicles = if options.game_dir.is_some() {
+            Some(super::vehicles::Scene::load(
                 &files,
                 map,
                 map_text,
@@ -234,6 +246,7 @@ impl Terrain {
             overlays,
             scenery,
             infantry,
+            vehicles,
             cells,
             images,
             report,

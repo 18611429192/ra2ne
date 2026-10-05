@@ -573,3 +573,28 @@ pass, including bounded malformed geometry and multi-frame matrix fixtures.
 Original vehicle rendering and gameplay remain pending; the overall 1.0 estimate
 remains unchanged. The 11 whole-map terrain/overlay acceptance gaps are separate
 from this successful file-format audit.
+
+## 2026-10-05: experimental vehicle drawing and resource animation
+
+Added a bounded unlit CPU voxel rasterizer with HVA frame selection, positional
+limb binding, depth occlusion, orthographic yaw projection and palette indices.
+The preview camera uses twelve pixels per model unit and three-pixel point
+splats. Map viewing now resolves rule/art image aliases, combines available
+body/turret/barrel resources and preserves actor IDs and terrain elevation.
+Missing/corrupt resources remain explicit diagnosed placeholders; SHP vehicles
+are unsupported. Optional attachment discovery follows filename availability.
+Art attachment offsets, stock facing calibration, aircraft height, normal
+lighting, owner recoloring and voxel shadows are not implemented.
+
+A separate native Macroquad resource showcase rotates Rhino and Grizzly tanks
+and cycles the original art-defined Walk frames for GI, Conscript and Attack Dog.
+Motion is scripted; map actors remain static and original combat/pathfinding
+integration is pending. The private recording is 1280×720, 30 fps, 360 frames
+(12 seconds). Original assets and recording frames are not committed.
+
+Validation: 122 regular workspace tests pass; one private full-map check remains
+opt-in. Clippy with warnings denied and release runtime/demo builds pass.
+The NewUrban sample resolves 38 voxel actors into 29 images with zero unresolved,
+plus 45 infantry; its 441 actors at 120 ticks retain hash 4ded6965e81531ec in
+headless and GPU runs. The earlier 11 failures in the 371-map graphics acceptance
+suite remain open; this batch does not claim exhaustive vehicle compatibility.

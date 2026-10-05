@@ -53,3 +53,9 @@ real package, with zero format failures. Selected stock resources provide 104
 model/pose bindings. The next rendering work still needs rasterization, normal
 lighting, turrets/barrels, remap and shadows; model parsing is not full vehicle
 support. Overall coverage remains approximately 25%.
+
+Experimental unlit VXL vehicles/aircraft now draw in the map viewer, with optional
+body/turret/barrel composition. A native resource showcase animates rotating
+vehicles and original infantry Walk frames. This is a rendering milestone;
+normal lighting, remap, shadows, attachment calibration and original gameplay
+integration remain pending. Overall coverage remains approximately 25%.

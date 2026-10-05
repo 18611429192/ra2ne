@@ -236,3 +236,24 @@ cargo run --release -p ra2ne-inspect -- hva /path/to/htnk.hva
 The resource audit also counts decoded voxels, pose matrices and empty HVA
 placeholders. Normal indices, model bounds and matrices are preserved for the
 forthcoming renderer. See the real-resource validation report for coverage.
+
+### Vehicle previews and resource animation
+
+Directory map viewing now also draws experimental unlit VXL vehicles/aircraft,
+composing the body and available `tur`/`barl` files with positional HVA bindings.
+Unsupported SHP vehicles and invalid resources remain diagnosed placeholders.
+
+A separate scripted showcase displays rotating Rhino/Grizzly tanks and original
+GI/Conscript/Attack Dog Walk frames. Prepare a local directory containing
+`local.mix`, `localmd.mix`, `conquer.mix`, `conqmd.mix`, `unittem.pal` and `artmd.ini`
+from your own installation, then run:
+
+```bash
+cargo run --release -p ra2ne-runtime --bin resource_demo -- /path/to/extracted-resources /path/to/new-frames-directory 360
+ffmpeg -framerate 30 -i /path/to/new-frames-directory/%04d.png -c:v libx264 -pix_fmt yuv420p -movflags +faststart showcase.mp4
+```
+
+Frame count is 1–900; output directory must not exist. At 30 fps, 360 frames
+produce 12 seconds of video. This is an original-resource animation display,
+not original gameplay. Voxel normals/lighting, shadows, owner remap, calibrated
+camera/facing conventions and art-defined attachment offsets remain pending.

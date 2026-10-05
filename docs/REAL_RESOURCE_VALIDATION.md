@@ -221,3 +221,14 @@ normals, all truncation points, bad offsets/run trailers, non-finite floats,
 frame-major matrices, index/name association, empty HVA placeholders and audit
 classification failures. Vehicle/aircraft rasterization, normal lighting,
 turret/barrel composition, remap/shadows and original gameplay remain pending.
+
+### Experimental vehicle rendering / native resource video
+
+The NewUrban sample `expandmd01/19a211e3.map` resolves 38 vehicle/aircraft records
+into 29 experimental unlit voxel images with zero unresolved. The same map has
+45 infantry and 441 total actors. Headless and GPU 120-tick checks retain state
+hash `4ded6965e81531ec`. This is one map sample, not a complete vehicle census.
+A 1280×720 native Macroquad showcase cycles original GI/CONS/DOG Walk frames and
+rotates composed HTNK/MTNK VXL/HVA models. Its 360 exported frames form a 12-second
+30-fps MP4. Scripted showcase motion does not implement map actor movement or
+original combat. The existing 11 full-map graphics failures remain unresolved.
