@@ -224,3 +224,15 @@ window and the renderer exports a framebuffer screenshot after the requested
 frames. Reading original resources does not imply that original gameplay is
 implemented. Native Windows builds and full cross-platform acceptance remain to
 be verified.
+
+VXL/HVA model inspection is now available; this is resource decoding, not yet
+vehicle rendering in the window:
+
+```sh
+cargo run --release -p ra2ne-inspect -- vxl /path/to/htnk.vxl --hva=/path/to/htnk.hva
+cargo run --release -p ra2ne-inspect -- hva /path/to/htnk.hva
+```
+
+The resource audit also counts decoded voxels, pose matrices and empty HVA
+placeholders. Normal indices, model bounds and matrices are preserved for the
+forthcoming renderer. See the real-resource validation report for coverage.

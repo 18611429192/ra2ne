@@ -60,7 +60,7 @@ fn map_report(bytes: &[u8], encoding: TextEncoding) -> Result<(), String> {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.len() < 2 {
-        return Err("usage: ra2ne-inspect audit|theater|ini|map|rules|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk] [--overlay=PATH] [--extension=tem|sno|urb|des|ubn|lun]".into());
+        return Err("usage: ra2ne-inspect audit|vxl|hva|theater|ini|map|rules|mix PATH [--file=NAME] [--nested=NAME,...] [--hash=classic|ra2] [--encoding=utf8|windows1252|gbk] [--overlay=PATH] [--extension=tem|sno|urb|des|ubn|lun] [--hva=PATH]".into());
     }
     if args[0] == "audit" {
         if args.len() != 2 {
@@ -68,6 +68,7 @@ fn run() -> Result<(), String> {
         }
         return audit::run(&args[1]);
     }
+    let mut hva_path = None;
     let mut extension = "tem";
     let mut file_name = None;
     let mut nested = None;
@@ -75,7 +76,14 @@ fn run() -> Result<(), String> {
     let mut encoding = TextEncoding::Utf8;
     let mut overlays = Vec::new();
     for arg in &args[2..] {
-        if let Some(value) = arg.strip_prefix("--extension=") {
+        if let Some(value) = arg.strip_prefix("--hva=") {
+            if args[0] != "vxl" {
+                return Err("hva option requires vxl mode".into());
+            }
+            if hva_path.replace(value).is_some() {
+                return Err("hva option can be given only once".into());
+            }
+        } else if let Some(value) = arg.strip_prefix("--extension=") {
             if args[0] != "theater" {
                 return Err("extension requires theater mode".into());
             }
@@ -102,6 +110,69 @@ fn run() -> Result<(), String> {
         return Err("overlay options require rules mode".into());
     }
     match args[0].as_str() {
+        "vxl" => {
+            if file_name.is_some() || nested.is_some() {
+                return Err("file/nested options require mix mode".into());
+            }
+            let bytes = read_bounded(&args[1], 64 * 1024 * 1024)?;
+            let model = ra2ne_assets::voxel::Vxl::parse(&bytes)?;
+            println!(
+                "vxl_sections={}; decoded_voxels={}; remap={:?}",
+                model.limbs.len(),
+                model.voxel_count(),
+                model.remap
+            );
+            if let Some(path) = hva_path {
+                let bytes = read_bounded(path, 64 * 1024 * 1024)?;
+                let pose = ra2ne_assets::voxel::Hva::parse(&bytes)?;
+                let indices = pose.bind(&model)?;
+                let names_differ = indices
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, j)| {
+                        !model.limbs[*i]
+                            .name
+                            .eq_ignore_ascii_case(&pose.sections[**j])
+                    })
+                    .count();
+                println!(
+                    "hva_frames={}; bound_sections={}; name_differences={}",
+                    pose.frames,
+                    indices.len(),
+                    names_differ
+                );
+            }
+            for limb in model.limbs {
+                println!(
+                    "section={}; size={:?}; voxels={}; normal_mode={}; bounds={:?}",
+                    limb.name,
+                    limb.dimensions,
+                    limb.voxels.len(),
+                    limb.normal_mode,
+                    limb.bounds
+                );
+            }
+        }
+        "hva" => {
+            if file_name.is_some() || nested.is_some() {
+                return Err("file/nested options require mix mode".into());
+            }
+            let bytes = read_bounded(&args[1], 64 * 1024 * 1024)?;
+            let pose = ra2ne_assets::voxel::Hva::parse(&bytes)?;
+            println!(
+                "hva_frames={}; sections={}; matrices={}",
+                pose.frames,
+                pose.sections.len(),
+                pose.frames * pose.sections.len()
+            );
+            for (i, name) in pose.sections.iter().enumerate() {
+                println!(
+                    "section={}; frame0={:?}",
+                    name,
+                    pose.transform(0, i).unwrap().rows
+                );
+            }
+        }
         "theater" => {
             if file_name.is_some() || nested.is_some() {
                 return Err("file/nested options require mix mode".into());
@@ -213,7 +284,7 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        _ => return Err("mode must be audit, ini, map, rules or mix".into()),
+        _ => return Err("mode must be audit, vxl, hva, theater, ini, map, rules or mix".into()),
     }
     Ok(())
 }

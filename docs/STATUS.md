@@ -557,3 +557,19 @@ screenshots show original civilian figures. 116 regular tests, strict Clippy and
 release builds pass. The same 11 whole-map terrain/overlay gaps remain visible.
 Owner remap, shadows, action animation, VXL actors and original gameplay are
 pending. The overall 1.0 estimate remains unchanged.
+
+## 2026-10-05: VXL/HVA readers and real-model audit
+
+Added bounded sparse VXL geometry decoding and HVA frame/section transforms.
+Model metadata, voxel palette/normal indices and file matrices remain available
+for rendering work. The inspector reports model/pose details and validates paired
+section counts. Strict named binding is optional; stock index association handles
+real HTK name differences. Empty probe.hva is explicitly counted as a placeholder.
+
+The full resource audit now reads 221 VXLs / 1,212,644 voxels and 221 HVAs / 468
+matrices with zero parsing failures. Selected stock rules resolve 104 related
+model stems with no missing HVA. 120 regular workspace tests and strict Clippy
+pass, including bounded malformed geometry and multi-frame matrix fixtures.
+Original vehicle rendering and gameplay remain pending; the overall 1.0 estimate
+remains unchanged. The 11 whole-map terrain/overlay acceptance gaps are separate
+from this successful file-format audit.

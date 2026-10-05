@@ -188,3 +188,36 @@ shadows, missions/action animation, VXL actors and original gameplay are pending
 
 The NewUrban release viewer was also run for 120 window frames. Its 441 actor
 records produce hash `4ded6965e81531ec`, matching a separate 120-tick headless run.
+
+## VXL/HVA geometry audit (2026-10-05)
+
+The expanded complete-package resource audit reports **zero parsing failures**:
+
+| Additional resource | Count |
+| --- | ---: |
+| VXL files | 221 |
+| Decoded voxels | 1,212,644 |
+| HVA files | 221 |
+| Pose matrices | 468 |
+| Empty HVA placeholders (included above) | 1 |
+
+Previous coverage remains 60 archives, 371 maps, 5,616 SHPs / 110,160 frames and
+9,929 TMPs / 46,392 decoded tile occurrences. 1,512 entries remain unidentified
+and 204 named entries unchecked. Successful format parsing remains distinct
+from the 11 documented whole-map graphics acceptance failures.
+
+A separate selected-stock-profile check resolves 104 unique VehicleTypes and
+AircraftTypes image/body/turret/barrel resource stems with matching VXL/HVA counts
+from local/localmd and conquer/conqmd, and no missing HVA among those models.
+This is not a complete actor renderer or complete mod resource search order.
+HTK and HTKtur initially failed strict name association; index association used
+by the stock readers resolves both. HTNK has one limb, 4,816 voxels, one HVA frame,
+normal mode 2 and matching DUMMY01 names; both new inspector commands were run
+against these real resources.
+
+120 regular workspace tests, strict Clippy, formatting and release inspector
+builds pass. Synthetic tests exercise sparse/empty columns, skip/run colors and
+normals, all truncation points, bad offsets/run trailers, non-finite floats,
+frame-major matrices, index/name association, empty HVA placeholders and audit
+classification failures. Vehicle/aircraft rasterization, normal lighting,
+turret/barrel composition, remap/shadows and original gameplay remain pending.

@@ -5,6 +5,7 @@ use ra2ne_assets::{
     sprite::{Palette, Shp},
     text::TextEncoding,
     tmp::Tmp,
+    voxel::{Hva, Vxl},
 };
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
@@ -20,6 +21,11 @@ struct Audit {
     tmp: usize,
     tiles: usize,
     palettes: usize,
+    vxl: usize,
+    voxels: usize,
+    hva: usize,
+    matrices: usize,
+    empty_hva: usize,
     map_diagnostics: usize,
     off_grid_waypoints: usize,
     trailers: BTreeMap<String, usize>,
@@ -125,6 +131,23 @@ impl Audit {
                 }
                 Err(e) => self.fail(path, e),
             }
+        } else if ext == "vxl" || bytes.starts_with(b"Voxel Animation\0") {
+            match Vxl::parse(bytes) {
+                Ok(v) => {
+                    self.vxl += 1;
+                    self.voxels += v.voxel_count();
+                }
+                Err(e) => self.fail(path, e),
+            }
+        } else if ext == "hva" || name.is_none() && looks_like_hva(bytes) {
+            match Hva::parse(bytes) {
+                Ok(h) => {
+                    self.hva += 1;
+                    self.empty_hva += usize::from(h.sections.is_empty());
+                    self.matrices += h.frames * h.sections.len();
+                }
+                Err(e) => self.fail(path, e),
+            }
         } else if ext == "shp"
             || (name.is_none() || ["tem", "sno", "urb", "ubn", "des", "lun"].contains(&ext))
                 && looks_like_shp(bytes)
@@ -172,6 +195,21 @@ impl Audit {
             self.unidentified += 1;
         }
     }
+}
+fn looks_like_hva(bytes: &[u8]) -> bool {
+    if bytes.len() < 24
+        || bytes.len() > 64 * 1024 * 1024
+        || bytes[..16]
+            .iter()
+            .any(|&b| b != 0 && !(32..=126).contains(&b))
+    {
+        return false;
+    }
+    let frames = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+    let sections = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+    (1..=4096).contains(&frames)
+        && (1..=256).contains(&sections)
+        && 24 + 16 * sections + 48 * frames * sections == bytes.len()
 }
 fn has_section(bytes: &[u8], section: &[u8]) -> bool {
     bytes.len() <= 16 * 1024 * 1024
@@ -245,6 +283,7 @@ pub fn run(path: &str) -> Result<(), String> {
         if !p.is_file()
             || ![
                 "mix", "map", "mpr", "yrm", "shp", "pal", "tem", "sno", "urb", "ubn", "des", "lun",
+                "vxl", "hva",
             ]
             .contains(&ext.as_str())
         {
@@ -281,6 +320,10 @@ pub fn run(path: &str) -> Result<(), String> {
         audit.failures.len()
     );
     println!(
+        "vxl={}; decoded_voxels={}; hva={}; pose_matrices={}; empty_hva_placeholders={}",
+        audit.vxl, audit.voxels, audit.hva, audit.matrices, audit.empty_hva
+    );
+    println!(
         "map_diagnostics={}; off_grid_waypoints={}; terrain_trailers={:?}; unidentified_entries={}; known_unchecked_entries={}",
         audit.map_diagnostics,
         audit.off_grid_waypoints,
@@ -302,4 +345,41 @@ pub fn run(path: &str) -> Result<(), String> {
         return Err("resource audit found failures".into());
     }
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn anonymous_hva_detection_and_named_empty_placeholder() {
+        let mut bytes = vec![0; 88];
+        bytes[..4].copy_from_slice(b"NONE");
+        bytes[16..20].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[24..28].copy_from_slice(b"Body");
+        for diagonal in [0, 5, 10] {
+            bytes[40 + diagonal * 4..44 + diagonal * 4].copy_from_slice(&1_f32.to_le_bytes());
+        }
+        let mut audit = Audit::default();
+        audit.content(&bytes, "anonymous", None, 0);
+        assert_eq!((audit.hva, audit.matrices, audit.failures.len()), (1, 1, 0));
+        let mut empty = vec![0; 24];
+        empty[16..20].copy_from_slice(&1_u32.to_le_bytes());
+        audit.content(&empty, "probe.hva", Some("probe.hva"), 0);
+        assert_eq!(
+            (audit.hva, audit.empty_hva, audit.failures.len()),
+            (2, 1, 0)
+        );
+        assert!(!looks_like_hva(&empty)); // no broad anonymous-empty guessing
+    }
+    #[test]
+    fn corrupt_named_voxel_and_non_finite_pose_are_failures() {
+        let mut audit = Audit::default();
+        audit.content(b"Voxel Animation\0", "broken.vxl", Some("broken.vxl"), 0);
+        let mut bytes = vec![0; 88];
+        bytes[16..20].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[40..44].copy_from_slice(&f32::NAN.to_le_bytes());
+        audit.content(&bytes, "broken.hva", Some("broken.hva"), 0);
+        assert_eq!((audit.vxl, audit.hva, audit.failures.len()), (0, 0, 2));
+    }
 }

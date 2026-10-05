@@ -13,3 +13,4 @@ pub mod text;
 pub mod theater;
 pub mod tmp;
 pub mod vfs;
+pub mod voxel;

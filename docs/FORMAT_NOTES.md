@@ -277,3 +277,38 @@ NewTheater, TerrainPalette and custom Palette infantry art are unsupported.
 A type with an existing rules definition remains drawable when map overrides
 replace its InfantryTypes registry label. This graphics behavior does not
 establish the game's complete registration/INI-loading semantics.
+
+## VXL geometry and HVA poses
+
+The published [EA/XCC VXL structures](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/3rdParty/xcc/misc/cc_structures.h)
+use an 802-byte file header, 28-byte limb headers and 92-byte limb footers. Body
+size locates the footers; footer offsets locate start/end tables and run data.
+Each x/y column is empty when both signed offsets are -1. Otherwise its inclusive
+end bounds the byte stream. Runs contain Z skip, voxel count, color/normal pairs
+and a repeated count byte; zero-color entries remain decoded voxels. RA2NE checks
+offset ranges, table overlap, duplicate count bytes, height progress and exact
+column consumption. Metadata includes raw palette/remap bytes, header flags,
+limb scale/bounds/local transform, dimensions and normal mode/indices.
+
+Reads are limited to 64 MiB, 256 limbs and 4,194,304 decoded voxels. Transforms,
+scale and bounds must be finite; scale must be positive and bounds ordered.
+Normal indices/modes are retained without interpreting lighting tables yet.
+The decoder has no original-game rasterization, normal lighting or shading.
+
+HVA has a 24-byte header, 16-byte section names and 48-byte 3x4 matrices.
+The [OpenRA HVA reader](https://github.com/OpenRA/OpenRA/blob/bleed/OpenRA.Mods.Cnc/FileFormats/HvaReader.cs)
+reads matrices in frame-major, section-minor order. RA2NE follows this layout,
+with a multi-frame/multi-section regression distinguishing it from section-major
+indexing present in the older XCC helper. Frames are bounded to 4,096 and sections
+to 256; byte size and finite matrix elements are checked before use. The generic
+matrix application helper checks finite results, but does not yet combine VXL
+local transforms, HVA translations and engine-specific model scaling.
+
+Stock readers associate limb and HVA sections by index, not names. Some shipped
+HTK/HTKtur files have differing names despite matching section counts. `bind`
+checks equal counts and preserves index association; `bind_by_name` provides
+optional strict tooling with explicit ambiguity/missing-name errors. The shipped
+probe.hva is a 24-byte, one-frame, zero-section placeholder. It parses and is
+counted separately, but cannot bind to a nonempty model or supply a matrix.
+Anonymous HVA detection requires a nonempty section table and an exact size;
+unknown resources are retained in audit coverage rather than assumed to be HVA.

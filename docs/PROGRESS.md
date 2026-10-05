@@ -47,3 +47,9 @@ Static original infantry now render with standing sequence frames, facings,
 subcells and elevation. All 4,011 placed infantry references across 371 maps
 resolve. This does not yet include owner remap, shadows, action animation, VXL
 vehicles/aircraft or original combat. Overall estimated coverage remains 25%.
+
+VXL/HVA geometry and pose readers now parse 221 models / 221 pose files from the
+real package, with zero format failures. Selected stock resources provide 104
+model/pose bindings. The next rendering work still needs rasterization, normal
+lighting, turrets/barrels, remap and shadows; model parsing is not full vehicle
+support. Overall coverage remains approximately 25%.
