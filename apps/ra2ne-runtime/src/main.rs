@@ -1,6 +1,7 @@
 //! Interactive engine preview. Synthetic scenario plus decoded map/sprite views.
 //! This is an integration milestone, not the finished RA2/YR game.
 mod battle;
+mod installation;
 mod production_ui;
 mod rule_scenario;
 mod session;
@@ -58,6 +59,10 @@ impl Options {
                 options.autoplay = true;
             } else if let Some(v) = arg.strip_prefix("--units=") {
                 options.units = v.parse().map_err(|_| "invalid unit count")?;
+            } else if let Some(v) = arg.strip_prefix("--game-dir=") {
+                options.terrain.game_dir = Some(v.into());
+            } else if let Some(v) = arg.strip_prefix("--edition=") {
+                options.terrain.edition = Some(installation::Edition::parse(v)?);
             } else if let Some(v) = arg.strip_prefix("--terrain-ini=") {
                 options.terrain.ini = Some(v.into());
             } else if let Some(v) = arg.strip_prefix("--terrain-palette=") {
@@ -212,6 +217,13 @@ impl Scene {
         Ok(())
     }
     fn load(options: &Options) -> Result<Self, String> {
+        let map_encoding = options
+            .encoding
+            .unwrap_or(if options.terrain.game_dir.is_some() {
+                TextEncoding::Windows1252
+            } else {
+                TextEncoding::Utf8
+            });
         let mut terrain = None;
         let sprite = match (&options.sprite, &options.palette) {
             (Some(shp), Some(pal)) => {
@@ -224,16 +236,13 @@ impl Scene {
         let (mut map, mut tiles, units, mut owners, mut name, map_view_only, mut messages, center) =
             if let Some(path) = &options.map {
                 let bytes = read(path, 16 * 1024 * 1024)?;
-                let text = options
-                    .encoding
-                    .unwrap_or(TextEncoding::Utf8)
-                    .decode(&bytes)?;
+                let text = map_encoding.decode(&bytes)?;
                 let original = Ra2Map::parse(&text)?;
                 if options.terrain.enabled() {
                     terrain = Some(terrain::Terrain::load(
                         &options.terrain,
                         &original,
-                        options.encoding.unwrap_or(TextEncoding::Utf8),
+                        map_encoding,
                     )?);
                 }
                 let tiles: Vec<_> = original
@@ -273,7 +282,14 @@ impl Scene {
                         }
                     })
                     .collect();
-                let center = tiles.first().map_or(Cell::new(32, 32), |t| t.0);
+                let center = if tiles.is_empty() {
+                    Cell::new(32, 32)
+                } else {
+                    Cell::new(
+                        tiles.iter().map(|t| t.0.x).sum::<i32>() / tiles.len() as i32,
+                        tiles.iter().map(|t| t.0.y).sum::<i32>() / tiles.len() as i32,
+                    )
+                };
                 let mut messages =
                     vec!["Map data viewer: original movement/gameplay pending".into()];
                 messages.extend(
@@ -704,10 +720,27 @@ async fn run(options: Options, mut scene: Scene) {
         clear_background(Color::from_rgba(13, 19, 20, 255));
         for &(p, height) in &scene.tiles {
             let pos = view.screen(p, height);
-            if pos.x < -80.0
-                || pos.x > screen_width() - SIDEBAR + 80.0
-                || pos.y < -80.0
-                || pos.y > screen_height() + 80.0
+            let terrain_image = scene
+                .terrain
+                .as_ref()
+                .and_then(|t| t.texture((p.x, p.y), &terrain_textures));
+            let (origin, size) = terrain_image.map_or(
+                (
+                    pos - vec2(30.0, 15.0) * view.zoom,
+                    vec2(60.0, 30.0) * view.zoom,
+                ),
+                |image| {
+                    (
+                        pos + vec2(image.offset.0 as f32 - 30.0, image.offset.1 as f32 - 15.0)
+                            * view.zoom,
+                        vec2(image.texture.width(), image.texture.height()) * view.zoom,
+                    )
+                },
+            );
+            if origin.x + size.x < 0.0
+                || origin.x > screen_width() - SIDEBAR
+                || origin.y + size.y < 56.0
+                || origin.y > screen_height()
             {
                 continue;
             }
@@ -716,18 +749,14 @@ async fn run(options: Options, mut scene: Scene) {
             } else {
                 Color::from_rgba(60, 77, 50, 255)
             };
-            if let Some(texture) = scene
-                .terrain
-                .as_ref()
-                .and_then(|t| t.texture((p.x, p.y), &terrain_textures))
-            {
+            if let Some(image) = terrain_image {
                 draw_texture_ex(
-                    texture,
-                    pos.x - 30.0 * view.zoom,
-                    pos.y - 15.0 * view.zoom,
+                    &image.texture,
+                    origin.x,
+                    origin.y,
                     WHITE,
                     DrawTextureParams {
-                        dest_size: Some(vec2(60.0, 30.0) * view.zoom),
+                        dest_size: Some(size),
                         ..Default::default()
                     },
                 );

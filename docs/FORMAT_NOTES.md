@@ -184,3 +184,29 @@ lookup and not authorization to extract paths. The audit preserves unknown entry
 coverage instead of inferring complete resource/gameplay support.
 
 See REAL_RESOURCE_VALIDATION.md for real-package checks and remaining limits.
+
+## Theater lookup and basic TMP composition
+
+The published [EA map editor](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditor/MapData.cpp)
+treats map tile ID `0xffff` as tile zero. The frontend preserves the raw signed
+map ID, while theater lookup resolves only `-1` to zero; other negative IDs fail.
+The [EA loading code](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditor/Loading.cpp)
+concatenates numeric TileSet counts, formats one-based two-digit filenames, reads
+counts with decimal-prefix `atoi` semantics, merges the corresponding MD theater
+INI and uses ISO palettes. NewUrban lookup can fall back to Urban, then all
+non-temperate theaters can fall back to Temperate. The resolved extension must
+also select its corresponding palette. Corrupt preferred files are errors rather
+than a reason to silently choose another resource.
+
+RA2NE applies decimal-prefix count handling only to this theater catalogue and
+reports each non-strict value. General INI integer parsing remains strict. The
+provided stock UrbanNMD INI contains `TilesInSet=o`, which resolves to zero in
+the original editor and must not shift subsequent map IDs.
+
+[EA/XCC TMP geometry](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/3rdParty/xcc/misc/tmp_ts_file.cpp)
+places base and extra graphics in the same coordinate system. RA2NE subtracts
+the subtile's base X/Y from extra X/Y and composites nonzero extra indices over
+the diamond; transparent extra pixels preserve base pixels. Bounding arithmetic
+uses i64 before dimension conversion, limits each composite to 4,194,304 pixels,
+and leaves Z planes separate. This basic image composition is not Z-buffer
+rendering or an implementation of the original game's complete rendering order.

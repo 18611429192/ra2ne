@@ -57,3 +57,37 @@ Rust 1.99.0, x86_64 Linux: 97 workspace tests pass; strict Clippy, formatting an
 The existing two-peer TCP/game replay fixture (2,000 units / 900 ticks) still matches hash `61f44cf2f816d1d4`, 148,099-byte replay. The sustained synthetic combat fixture (10,000 units / 900 ticks / 31 checkpoints) still matches `81fcc0038225b6df`, 2.789 ms/Tick on this host while the TCP check also ran. These are synthetic engine measurements, not original-game comparisons.
 
 Original terrain rendering/passability, full INI semantics, units/animations/voxels/audio, construction, AI, triggers, playable multiplayer and end-to-end real-map/MOD acceptance remain unfinished. Overall estimated 1.0 feature coverage remains approximately 25%; this batch establishes authentic parsing coverage, not full-game completion.
+
+## Stock installation terrain viewing (2026-10-05)
+
+`--game-dir=... --edition=yr` now resolves the following real map samples from the
+uploaded installation. Counts refer to unique tile/subtile images; extras are
+included in those images, not additional map cells. All six use the stock game's
+matching INI and ISO palette. Original source files remain outside the repository.
+
+| Theater | Archive / map ID | Images | Images with extras | Fallback cells |
+| --- | --- | ---: | ---: | ---: |
+| Temperate | expandmd01 / b6bdb430 | 129 | 80 | 0 |
+| Snow | expandmd01 / 0629413d | 936 | 214 | 0 |
+| Urban | maps01 / 179782bb | 1022 | 132 | 0 |
+| Desert | expandmd01 / 03a45e74 | 869 | 112 | 0 |
+| NewUrban | expandmd01 / 19a211e3 | 893 | 104 | 0 |
+| Lunar | mapsmd03 / 8ba1de85 | 216 | 25 | 0 |
+
+The earlier multimd / 86b74276 map resolves 599 images, five with extras, and zero
+fallback cells after clear-marker handling. Running it for 120 actual window
+frames gives the same `6209414cb5672eb7` hash as 120 headless ticks. Temperate,
+NewUrban and Urban window screenshots have been inspected for palette selection,
+terrain image alignment and visible extra graphics. An initial incorrect ordinary
+scene palette was detected by that inspection and replaced by the ISO palette.
+
+The Urban sample's rubble resources reside in the ordinary `urban.mix`, not just
+`isourb.mix`; mounting only ISO archives missed 416 cells. NewUrban's INI also
+contains a literal letter `o` as a tile-set count. Its original decimal-prefix
+behavior is supported with an explicit diagnostic. These were real-resource
+compatibility failures, not changes to synthetic gameplay rules.
+
+This validates these sample maps and the basic rendering path. It does not
+certify every original map, the complete stock/mod mount order, overlays and
+animation, per-pixel depth/lighting, navigation or gameplay. 107 current workspace
+tests pass; the 1.0 feature-coverage estimate remains about 25%.

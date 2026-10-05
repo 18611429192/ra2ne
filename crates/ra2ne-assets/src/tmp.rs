@@ -20,6 +20,13 @@ pub struct TmpTile {
     extra: Option<(u16, u16, Range<usize>)>,
     extra_z: Option<Range<usize>>,
 }
+/// One subtile, with extra graphics composited relative to its diamond origin.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TmpImage {
+    pub image: IndexedImage,
+    pub offset_x: i32,
+    pub offset_y: i32,
+}
 #[derive(Clone, Debug)]
 pub struct Tmp {
     pub blocks_width: u16,
@@ -142,6 +149,55 @@ impl Tmp {
             self.cell_height,
         )
     }
+    /// Index zero is transparent in extra graphics. Coordinates in the TMP
+    /// header share a tile-wide origin; subtract the subtile's diamond origin.
+    /// Z planes remain separate for a future depth-aware renderer.
+    pub fn composite(&self, index: usize) -> Result<TmpImage, &'static str> {
+        let base = self.diamond(index)?;
+        let Some(extra) = self.extra(index) else {
+            return Ok(TmpImage {
+                image: base,
+                offset_x: 0,
+                offset_y: 0,
+            });
+        };
+        let tile = self.tile(index).ok_or("missing TMP tile")?;
+        let dx = i64::from(tile.extra_x) - i64::from(tile.x);
+        let dy = i64::from(tile.extra_y) - i64::from(tile.y);
+        let left = dx.min(0);
+        let top = dy.min(0);
+        let right = (dx + i64::from(extra.width)).max(i64::from(base.width));
+        let bottom = (dy + i64::from(extra.height)).max(i64::from(base.height));
+        let width =
+            u16::try_from(right - left).map_err(|_| "TMP composite width exceeds limits")?;
+        let height =
+            u16::try_from(bottom - top).map_err(|_| "TMP composite height exceeds limits")?;
+        let count = usize::from(width) * usize::from(height);
+        if count > MAX_PIXELS {
+            return Err("TMP composite pixel budget exceeded");
+        }
+        let mut image = IndexedImage {
+            width,
+            height,
+            pixels: vec![0; count],
+        };
+        for (source, x, y) in [(&base, -left, -top), (&extra, dx - left, dy - top)] {
+            for row in 0..usize::from(source.height) {
+                for column in 0..usize::from(source.width) {
+                    let pixel = source.pixels[row * usize::from(source.width) + column];
+                    if pixel != 0 {
+                        image.pixels
+                            [(y as usize + row) * usize::from(width) + x as usize + column] = pixel;
+                    }
+                }
+            }
+        }
+        Ok(TmpImage {
+            image,
+            offset_x: left as i32,
+            offset_y: top as i32,
+        })
+    }
     pub fn z_plane(&self, index: usize) -> Result<Option<IndexedImage>, &'static str> {
         let tile = self.tile(index).ok_or("missing TMP tile")?;
         tile.z
@@ -230,6 +286,51 @@ mod tests {
         );
         assert!(tmp.extra(0).is_none());
         assert!(tmp.z_plane(0).unwrap().is_none());
+    }
+    #[test]
+    fn composites_negative_offsets_and_preserves_pixels_under_transparency() {
+        let mut bytes = sample();
+        // Base origin (100, 200), extra origin (99, 199), a 5x2 rectangle.
+        for (offset, value) in [
+            (20, 100_i32),
+            (24, 200),
+            (28, 68),
+            (40, 99),
+            (44, 199),
+            (48, 5),
+            (52, 2),
+            (56, 1),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend([90, 91, 92, 93, 94, 95, 0, 0, 0, 96]);
+        let tmp = Tmp::parse(Arc::from(bytes)).unwrap();
+        let composite = tmp.composite(0).unwrap();
+        assert_eq!((composite.offset_x, composite.offset_y), (-1, -1));
+        assert_eq!((composite.image.width, composite.image.height), (9, 5));
+        assert_eq!(&composite.image.pixels[..4], &[90, 91, 92, 93]);
+        assert_eq!(composite.image.pixels[9 + 3], 1); // transparent extra preserves base
+        assert_eq!(composite.image.pixels[9 + 4], 96); // extra overwrites base
+        assert_eq!(composite.image.pixels[9 + 5], 3);
+    }
+    #[test]
+    fn composites_reject_extreme_offsets_without_overflow_or_allocation() {
+        let mut bytes = sample();
+        for (offset, value) in [
+            (20, i32::MIN),
+            (28, 68),
+            (40, i32::MAX),
+            (48, 1),
+            (52, 1),
+            (56, 1),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes.push(1);
+        assert!(Tmp::parse(Arc::from(bytes)).unwrap().composite(0).is_err());
+        let tmp = Tmp::parse(Arc::from(sample())).unwrap();
+        assert_eq!(tmp.composite(0).unwrap().image, tmp.diamond(0).unwrap());
+        assert!(tmp.composite(1).is_err());
     }
     #[test]
     fn missing_tiles_and_bad_offsets_fail_without_overread() {

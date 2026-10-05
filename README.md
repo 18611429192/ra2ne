@@ -161,19 +161,37 @@ Battle previews can now record local commands with `--record-replay=PATH` and
 verify the saved session headlessly with standalone `--play-replay=PATH`.
 The production queue is paged and individual jobs can be cancelled/refunded.
 
-The original-map viewer can now load **base TMP terrain images** using an
-explicit theater INI, terrain palette and one or more extracted terrain MIXs:
+The original-map viewer can load your stock game's terrain directly:
 
 ```sh
-cargo run --release -p ra2ne-runtime -- --map=example.mpr --encoding=windows1252 --terrain-ini=temperat.ini --terrain-palette=temperat.pal --terrain-mix=isotemp.mix --terrain-mix=isotemmd.mix
+cargo run --release -p ra2ne-runtime -- --map=example.mpr --game-dir=/path/to/game --edition=yr
+```
+
+Choose `--edition=ra2` for RA2 or `--edition=yr` for Yuri's Revenge. The directory
+profile reads the stock RA2/YR root archives and selected nested theater resources,
+merges the matching base/MD theater INIs and chooses the appropriate **ISO palette**.
+It supports all six theaters in YR. Directory mode defaults to Windows-1252;
+`--encoding=utf8|windows1252|gbk` overrides map/INI decoding. Executables are not read.
+Expansion/mod archives, loose resource overrides and complete engine search-order
+compatibility are pending; this profile covers stock terrain viewing.
+
+Explicit resources remain available for controlled experiments:
+
+```sh
+cargo run --release -p ra2ne-runtime -- --map=example.mpr --encoding=windows1252 --terrain-ini=temperat.ini --terrain-palette=isotem.pal --terrain-mix=isotemp.mix --terrain-mix=isotemmd.mix
 cargo run -p ra2ne-inspect -- theater temperat.ini --extension=tem --encoding=windows1252
 ```
 
 Repeated terrain MIX options mount in command-line order; later mounts override
-earlier ones. These are explicit resources, not an automatic installation search
-profile. Use the INI and palette matching your map and resource edition. The
-inspector defaults to `.tem`; select the correct extension for other theaters.
-The viewer reports unresolved cells and uses its synthetic diamond fallback for
-them. Negative tile IDs are currently unresolved. Extra TMP graphics, damaged
-variants, random tile variants, lighting, Z-buffer occlusion and terrain
-passability are pending. Loading terrain images does not enable original gameplay.
+earlier ones. Explicit mounts have a shared 256 MiB input budget and cannot be
+combined with directory mode. Use the INI and ISO palette matching your resources;
+`temperat.pal` is a different palette and gives incorrect terrain colors. Mount
+additional common/theater MIXs when a map needs them. Cross-theater tile fallback
+also needs its ISO palette in the mounts. The inspector defaults to `.tem`;
+select the correct extension for other theaters.
+
+The viewer composites diamond and extra TMP graphics using their relative offsets,
+handles the map's `0xffff` clear marker and reports unresolved cells. Original
+cross-theater fallbacks retain the resolved resource's palette identity. Damaged
+and random variants, animations, lighting, Z-buffer occlusion, overlays, terrain
+passability and original gameplay remain incomplete.

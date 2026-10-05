@@ -109,7 +109,14 @@ fn run() -> Result<(), String> {
             let bytes = read_bounded(&args[1], 16 * 1024 * 1024)?;
             let text = encoding.decode(&bytes)?;
             let theater = ra2ne_assets::theater::Theater::parse(&text, extension)?;
-            println!("theater_tile_files={}", theater.tiles.len());
+            println!(
+                "theater_tile_files={}; diagnostics={}",
+                theater.tiles.len(),
+                theater.diagnostics.len()
+            );
+            for diagnostic in &theater.diagnostics {
+                println!("diagnostic={diagnostic}");
+            }
             for (id, tile) in theater.tiles.iter().enumerate() {
                 println!(
                     "tile_id={id}; set={}; number={}; filename={}",

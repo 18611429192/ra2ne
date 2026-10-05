@@ -469,3 +469,38 @@ This validates resource resolution/decoding; the interactive texture placement
 has not been visually verified in this environment. No original files are shipped.
 Automatic game-directory mounting, clear-cell handling, extras, lighting and
 occlusion remain incomplete; the overall 1.0 estimate remains unchanged.
+
+## 2026-10-05: stock directory terrain, clear markers and extra graphics
+
+The original-map viewer now accepts `--game-dir=PATH --edition=ra2|yr` and reads
+selected stock nested archives, including common/theater resources outside the
+ISO-only archives. It merges base/MD theater INIs, automatically selects ISO
+palettes and defaults directory text to Windows-1252. RA2 mode excludes YR
+archives; YR mode requires both root archives. Root input is capped at 512 MiB,
+mounted terrain archives at 256 MiB and decoded RGBA images at 128 MiB.
+Ambiguous filename case collisions fail. This is a narrow stock terrain profile;
+expansion/mod archives, loose overrides and complete game search order are pending.
+
+Clear marker `0xffff` now resolves to tile zero. Base/extra TMP pixels composite
+at their relative offsets with transparent extra pixels preserving the diamond.
+Image bounds drive culling, preventing tall extras from disappearing when their
+cell anchor leaves the viewport. The camera starts at the map center. NewUrban
+and Temperate resource fallbacks retain the correct palette identity; damaged
+preferred resources do not silently fall back. Theater count compatibility
+handles and reports the stock `TilesInSet=o` entry without relaxing general INI
+integer parsing.
+
+Verified: 107 workspace tests, strict Clippy, formatting and release builds.
+Synthetic tests cover clear markers, offset/transparent composition, extreme
+bounds, palette identity, corrupt preferred assets, stock directory case lookup,
+base/MD INI merging, resource overrides and option conflicts. Actual maps from
+all six theaters load with zero fallback cells; detailed counts are in
+REAL_RESOURCE_VALIDATION.md. Temperate directory loading also runs 120 actual
+window frames/120 ticks with hash `6209414cb5672eb7`; Temperate, NewUrban and Urban
+screenshots were visually inspected. The previous manual example's ordinary
+`temperat.pal` was corrected to the terrain `isotem.pal` after window validation.
+
+Original actors are still placeholders. Overlays/bridge spans, animated tiles,
+random/damaged variants, lighting and pixel depth order, terrain passability and
+original gameplay remain incomplete. This advances authentic terrain viewing,
+not full-game acceptance; the overall 1.0 coverage estimate remains about 25%.

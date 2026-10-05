@@ -26,3 +26,8 @@ Reassess the overall estimate at substantial end-to-end milestones rather than
 counting commits or unit tests as progress points.
 
 Actual package parsing has now been checked for identified maps, SHP frames and TMP tiles; see REAL_RESOURCE_VALIDATION.md. This does not change the original gameplay acceptance status.
+
+Stock directory terrain viewing now loads samples from all six theaters, handles
+clear markers and composites extra graphics with matching ISO palettes. Window
+screenshots were inspected. Full map rendering and original gameplay acceptance
+are still pending; the overall coverage estimate remains unchanged.

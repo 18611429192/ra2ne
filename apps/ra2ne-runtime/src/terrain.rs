@@ -2,7 +2,7 @@
 use macroquad::prelude::*;
 use ra2ne_assets::{
     map::Ra2Map,
-    mix::{FilenameHash, MAX_ARCHIVE_BYTES, MixArchive},
+    mix::{FilenameHash, MixArchive},
     sprite::Palette,
     theater::Theater,
     vfs::Vfs,
@@ -11,15 +11,35 @@ use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct Options {
+    pub game_dir: Option<String>,
+    pub edition: Option<super::installation::Edition>,
     pub ini: Option<String>,
     pub palette: Option<String>,
     pub mixes: Vec<String>,
 }
 impl Options {
     pub fn enabled(&self) -> bool {
-        self.ini.is_some() || self.palette.is_some() || !self.mixes.is_empty()
+        self.game_dir.is_some()
+            || self.edition.is_some()
+            || self.ini.is_some()
+            || self.palette.is_some()
+            || !self.mixes.is_empty()
     }
     pub fn validate(&self, map: bool) -> Result<(), String> {
+        if self.game_dir.is_some() {
+            if !map
+                || self.edition.is_none()
+                || self.ini.is_some()
+                || self.palette.is_some()
+                || !self.mixes.is_empty()
+            {
+                return Err("game-dir terrain requires --map and --edition=ra2|yr and cannot combine explicit terrain files".into());
+            }
+            return Ok(());
+        }
+        if self.edition.is_some() {
+            return Err("edition requires game-dir".into());
+        }
         if self.enabled()
             && (!map
                 || self.ini.is_none()
@@ -32,9 +52,19 @@ impl Options {
         Ok(())
     }
 }
+struct Image {
+    width: u16,
+    height: u16,
+    rgba: Vec<u8>,
+    offset: (i32, i32),
+}
+pub struct TerrainTexture {
+    pub texture: Texture2D,
+    pub offset: (i32, i32),
+}
 pub struct Terrain {
     cells: BTreeMap<(i32, i32), (i16, u8)>,
-    images: BTreeMap<(i16, u8), (u16, u16, Vec<u8>)>,
+    images: BTreeMap<(i16, u8), Image>,
     pub report: String,
 }
 impl Terrain {
@@ -44,6 +74,9 @@ impl Terrain {
         encoding: ra2ne_assets::text::TextEncoding,
     ) -> Result<Self, String> {
         options.validate(true)?;
+        if !options.enabled() {
+            return Err("terrain options are absent".into());
+        }
         let extension = match map.theater.to_ascii_uppercase().as_str() {
             "TEMPERATE" => "tem",
             "SNOW" => "sno",
@@ -53,19 +86,36 @@ impl Terrain {
             "LUNAR" => "lun",
             _ => return Err("unsupported map theater".into()),
         };
-        let ini_bytes = super::read(options.ini.as_ref().unwrap(), 16 * 1024 * 1024)?;
-        let ini = encoding.decode(&ini_bytes)?;
-        let theater = Theater::parse(&ini, extension)?;
-        let palette = Palette::parse(&super::read(options.palette.as_ref().unwrap(), 768)?)?;
-        let mut files = Vfs::default();
-        let mut mounted = 0;
-        for path in &options.mixes {
-            let bytes = super::read(path, MAX_ARCHIVE_BYTES)?;
-            mounted += bytes.len();
-            if mounted > MAX_ARCHIVE_BYTES {
-                return Err("terrain mount total exceeds archive budget".into());
+        let (theater, palette, files) = if let Some(root) = &options.game_dir {
+            super::installation::load(root, options.edition.unwrap(), &map.theater, encoding)?
+        } else {
+            let ini_bytes = super::read(options.ini.as_ref().unwrap(), 16 * 1024 * 1024)?;
+            let ini = encoding.decode(&ini_bytes)?;
+            let theater = Theater::parse(&ini, extension)?;
+            let palette = Palette::parse(&super::read(options.palette.as_ref().unwrap(), 768)?)?;
+            let mut files = Vfs::default();
+            let mut mounted = 0;
+            for path in &options.mixes {
+                let bytes = super::read(path, 256 * 1024 * 1024 - mounted)?;
+                mounted += bytes.len();
+                if mounted > 256 * 1024 * 1024 {
+                    return Err("terrain mount total exceeds archive budget".into());
+                }
+                files.mount_mix(path, MixArchive::parse(bytes.into())?, FilenameHash::Ra2)?;
             }
-            files.mount_mix(path, MixArchive::parse(bytes.into())?, FilenameHash::Ra2)?;
+            (theater, palette, files)
+        };
+        for diagnostic in &theater.diagnostics {
+            eprintln!("theater catalogue: {diagnostic}");
+        }
+        let mut palettes = BTreeMap::new();
+        palettes.insert(extension.to_owned(), palette);
+        for (ext, name) in [("tem", "isotem.pal"), ("urb", "isourb.pal")] {
+            if !palettes.contains_key(ext)
+                && let Some(file) = files.get(name)?
+            {
+                palettes.insert(ext.to_owned(), Palette::parse(file.bytes)?);
+            }
         }
         let cells = map
             .tiles
@@ -86,19 +136,29 @@ impl Terrain {
             *references.entry(id).or_default().entry(sub).or_default() += 1;
         }
         for (id, subtiles) in references {
-            let tmp = match theater.load(id, &files) {
-                Ok(tmp) => tmp,
+            let resolved = match theater.resolve(id, &files) {
+                Ok(resolved) => resolved,
                 Err(error) => {
                     missing += subtiles.values().sum::<usize>();
                     eprintln!("terrain tile {id}: {error}");
                     continue;
                 }
             };
+            let source_extension = resolved.filename.rsplit_once('.').unwrap().1;
+            let Some(palette) = palettes.get(source_extension) else {
+                missing += subtiles.values().sum::<usize>();
+                eprintln!(
+                    "terrain tile {id}: palette missing for {}",
+                    resolved.filename
+                );
+                continue;
+            };
+            let tmp = resolved.tmp;
             if tmp.cell_width != 60 || tmp.cell_height != 30 {
                 return Err("viewer requires 60x30 TMP cells".into());
             }
             for (sub, cell_count) in subtiles {
-                let image = match tmp.diamond(usize::from(sub)) {
+                let composite = match tmp.composite(usize::from(sub)) {
                     Ok(image) => image,
                     Err(error) => {
                         missing += cell_count;
@@ -106,6 +166,7 @@ impl Terrain {
                         continue;
                     }
                 };
+                let image = composite.image;
                 if tmp.extra(usize::from(sub)).is_some() {
                     extras += 1;
                 }
@@ -115,7 +176,12 @@ impl Terrain {
                 }
                 images.insert(
                     (id, sub),
-                    (image.width, image.height, palette.rgba(&image, true)),
+                    Image {
+                        width: image.width,
+                        height: image.height,
+                        rgba: palette.rgba(&image, true),
+                        offset: (composite.offset_x, composite.offset_y),
+                    },
                 );
             }
         }
@@ -123,7 +189,7 @@ impl Terrain {
             return Err("no map terrain images resolved from the supplied mounts".into());
         }
         let report = format!(
-            "Terrain base images: {}; fallback cells: {missing}; extra-image variants pending: {extras}",
+            "Terrain images: {}; fallback cells: {missing}; extra-image variants: {extras}",
             images.len()
         );
         eprintln!("{report}");
@@ -133,21 +199,52 @@ impl Terrain {
             report,
         })
     }
-    pub fn textures(&self) -> BTreeMap<(i16, u8), Texture2D> {
+    pub fn textures(&self) -> BTreeMap<(i16, u8), TerrainTexture> {
         self.images
             .iter()
-            .map(|(&key, (w, h, rgba))| {
-                let texture = Texture2D::from_rgba8(*w, *h, rgba);
+            .map(|(&key, image)| {
+                let texture = Texture2D::from_rgba8(image.width, image.height, &image.rgba);
                 texture.set_filter(FilterMode::Nearest);
-                (key, texture)
+                (
+                    key,
+                    TerrainTexture {
+                        texture,
+                        offset: image.offset,
+                    },
+                )
             })
             .collect()
     }
     pub fn texture<'a>(
         &self,
         cell: (i32, i32),
-        textures: &'a BTreeMap<(i16, u8), Texture2D>,
-    ) -> Option<&'a Texture2D> {
+        textures: &'a BTreeMap<(i16, u8), TerrainTexture>,
+    ) -> Option<&'a TerrainTexture> {
         textures.get(self.cells.get(&cell)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn directory_and_explicit_mount_modes_cannot_be_ambiguous() {
+        let mut options = Options::default();
+        assert!(options.validate(false).is_ok());
+        options.game_dir = Some("game".into());
+        assert!(options.validate(true).is_err());
+        options.edition = Some(super::super::installation::Edition::Yr);
+        assert!(options.validate(true).is_ok());
+        assert!(options.validate(false).is_err());
+        options.mixes.push("isotemp.mix".into());
+        assert!(options.validate(true).is_err());
+        options.game_dir = None;
+        assert!(options.validate(true).is_err());
+        options.edition = None;
+        options.ini = Some("temperat.ini".into());
+        options.palette = Some("isotem.pal".into());
+        assert!(options.validate(true).is_ok());
+        options.mixes = vec!["archive.mix".into(); 17];
+        assert!(options.validate(true).is_err());
     }
 }
