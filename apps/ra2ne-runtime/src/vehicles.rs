@@ -3,6 +3,7 @@ use macroquad::prelude::*;
 use ra2ne_assets::{
     map::{ObjectKind, Ra2Map},
     overlay::Environment,
+    remap,
     rules::RuleSet,
     sprite::Palette,
     text::TextEncoding,
@@ -103,7 +104,23 @@ impl Scene {
                 let height = *heights
                     .get(&(object.cell.x, object.cell.y))
                     .ok_or("vehicle outside decoded terrain")?;
-                let key = (name.clone(), usize::from(object.facing));
+                let remap_enabled = remap::enabled(&rules, &art, &object.type_id);
+                let owner_color = match if remap_enabled {
+                    remap::house_color(&rules, &object.house)
+                } else {
+                    Ok(None)
+                } {
+                    Ok(value) => value,
+                    Err(error) => {
+                        eprintln!("owner {}: {error}; preserving source palette", object.house);
+                        None
+                    }
+                };
+                let cache_name = owner_color.map_or_else(
+                    || name.clone(),
+                    |rgb| format!("{name}@{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]),
+                );
+                let key = (cache_name, usize::from(object.facing));
                 let mut parts = Vec::new();
                 for suffix in ["", "tur", "barl"] {
                     let part = format!("{name}{suffix}");
@@ -149,7 +166,12 @@ impl Scene {
                         Image {
                             width: raster.image.width,
                             height: raster.image.height,
-                            rgba: palette.rgba(&raster.image, true),
+                            rgba: owner_color
+                                .map(|rgb| remap::palette(&palette, models[&name].0.remap, rgb))
+                                .transpose()?
+                                .as_ref()
+                                .unwrap_or(&palette)
+                                .rgba(&raster.image, true),
                             offset: raster.offset,
                         },
                     );

@@ -257,3 +257,8 @@ Frame count is 1–900; output directory must not exist. At 30 fps, 360 frames
 produce 12 seconds of video. This is an original-resource animation display,
 not original gameplay. Voxel normals/lighting, shadows, owner remap, calibrated
 camera/facing conventions and art-defined attachment offsets remain pending.
+
+Vehicle/infantry map previews also resolve named house colors from rules/map HSV
+entries. Color ramps are experimental brightness-preserving previews, honor art
+`Remapable` flags, and keep palette indices outside the remap range intact.
+Numeric multiplayer color assignments and stock saturation curves are pending.

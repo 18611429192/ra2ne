@@ -4,6 +4,7 @@ use ra2ne_assets::{
     infantry::{StandingPose, subcell_offset},
     map::{ObjectKind, Ra2Map},
     overlay::Environment,
+    remap,
     rules::RuleSet,
     sprite::{Palette, Shp},
     text::TextEncoding,
@@ -104,7 +105,23 @@ impl Scene {
                     sprites.insert(name.clone(), Shp::parse(Arc::from(file.bytes))?);
                 }
                 let shp = &sprites[&name];
-                let key = (name.clone(), frame);
+                let remap_enabled = remap::enabled(&rules, &art, &object.type_id);
+                let owner_color = match if remap_enabled {
+                    remap::house_color(&rules, &object.house)
+                } else {
+                    Ok(None)
+                } {
+                    Ok(value) => value,
+                    Err(error) => {
+                        eprintln!("owner {}: {error}; preserving source palette", object.house);
+                        None
+                    }
+                };
+                let cache_name = owner_color.map_or_else(
+                    || name.clone(),
+                    |rgb| format!("{name}@{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]),
+                );
+                let key = (cache_name, frame);
                 if !scene.images.contains_key(&key) {
                     let image = shp.frame(frame)?;
                     bytes += image.pixels.len() * 4;
@@ -116,7 +133,12 @@ impl Scene {
                         Image {
                             width: image.width,
                             height: image.height,
-                            rgba: palette.rgba(&image, true),
+                            rgba: owner_color
+                                .map(|rgb| remap::palette(&palette, [16, 31], rgb))
+                                .transpose()?
+                                .as_ref()
+                                .unwrap_or(&palette)
+                                .rgba(&image, true),
                         },
                     );
                 }

@@ -15,3 +15,5 @@ pub mod tmp;
 pub mod vfs;
 pub mod voxel;
 pub mod voxel_render;
+
+pub mod remap;

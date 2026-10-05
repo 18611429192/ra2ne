@@ -598,3 +598,20 @@ The NewUrban sample resolves 38 voxel actors into 29 images with zero unresolved
 plus 45 infantry; its 441 actors at 120 ticks retain hash 4ded6965e81531ec in
 headless and GPU runs. The earlier 11 failures in the 371-map graphics acceptance
 suite remain open; this batch does not claim exhaustive vehicle compatibility.
+
+## 2026-10-05: experimental owner palettes for vehicles and infantry
+
+Rules/map `House.Color` labels now resolve through `[Colors]` HSV entries. Only
+vehicle VXL remap ranges or infantry indices 16–31 change; source ramp brightness
+is preserved in a preview gradient. Texture cache keys include the resolved RGB,
+so differently colored owners cannot share the wrong cached texture. Art
+`Remapable=no/false/0` is honored before optional image aliases. Undefined house
+colors retain source palettes; malformed colors are diagnosed and retain source
+palettes. Numeric multiplayer color assignments and original saturation curves
+are still pending, and the gradient is not claimed to reproduce stock shading.
+
+Verification: 125 workspace tests pass, one private acceptance check is ignored.
+Clippy with denied warnings and release builds pass. The NewUrban GPU sample
+retains 441 actors and hash 4ded6965e81531ec at 120 ticks; all 38 voxel actors and
+45 infantry resolve. Normal lighting remains pending; no GPL implementation or
+normal tables were copied from OpenRA while investigating that next step.

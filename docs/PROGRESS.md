@@ -59,3 +59,8 @@ body/turret/barrel composition. A native resource showcase animates rotating
 vehicles and original infantry Walk frames. This is a rendering milestone;
 normal lighting, remap, shadows, attachment calibration and original gameplay
 integration remain pending. Overall coverage remains approximately 25%.
+
+Experimental owner-color previews now use rules/map HSV definitions for vehicles
+and infantry while preserving neutral palettes and art remap flags. Cache keys
+separate owner colors. Stock gradient/lighting calibration remains pending;
+overall estimated coverage remains approximately 25%.
