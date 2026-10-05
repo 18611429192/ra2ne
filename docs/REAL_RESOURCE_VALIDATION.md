@@ -144,3 +144,24 @@ cargo test -p ra2ne-runtime all_private_map_graphics_resolve_and_decode -- --ign
 113 regular workspace tests pass, plus this separately run private acceptance
 check. Overlay rendering remains static: mining/growth, connectivity, bridge
 passability, animation, shadows, lighting and original gameplay are unfinished.
+
+## Placed trees, lamps and other scenery (2026-10-05)
+
+The strict full-map check now also resolves `[Terrain]` objects for **all 371
+maps**, including the six maps where terrain validation stops early. With the
+same YR stock profile, 165,818 scenery records resolve, 7,261 per-map image-cache
+entries decode, zero records lie outside decoded terrain, and zero maps have
+unresolved scenery. Cache-entry counts include repeated assets across maps.
+The existing overall result is unchanged: 360 complete maps pass and 11 fail on
+previously documented terrain/overlay references. The strict private test still
+fails as a whole; the scenery-specific checks do not erase those failures.
+
+NewUrban/19a211e3 resolves 1,250 scenery objects and 28 distinct images. Its release
+window screenshot was inspected for tree, street-lamp and sign placement.
+Temperate multimd/86b74276 resolves 1,040 scenery objects and 13 distinct images;
+its 120-frame release window run retains hash `6209414cb5672eb7`.
+114 regular workspace tests pass. A new synthetic regression checks named,
+case-insensitive types, rules/art aliases, native palette identity, frame-zero
+pixels, scenery anchoring and preservation/diagnosis of invalid records.
+Animation, shadows, emitted light, occupation/collision and destruction remain
+pending, as does complete original gameplay.

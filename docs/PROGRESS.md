@@ -37,3 +37,8 @@ theater palettes. Six theater samples resolve all overlay references. A strict
 371-map graphics check passes 360 maps and reports 11 remaining failures involving
 terrain resources/subtiles and overlay frame references. These are documented
 acceptance gaps; original gameplay and the 1.0 estimate remain unchanged.
+
+Placed trees, lamps and signs now render as static original scenery. All 165,818
+scenery references across 371 maps resolve, with inspected release screenshots.
+This advances original-resource viewing; scenery collision, animation and full
+original gameplay remain pending. The overall estimate remains approximately 25%.

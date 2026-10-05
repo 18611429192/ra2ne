@@ -76,6 +76,12 @@ pub struct Ra2Map {
     pub objects: Vec<MapObject>,
     pub diagnostics: Vec<MapDiagnostic>,
 }
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SceneryObject {
+    pub cell: Cell,
+    pub type_id: String,
+    pub line: usize,
+}
 fn rect(entry: &Entry) -> Result<MapRect, String> {
     let values = entry
         .value
@@ -101,6 +107,44 @@ fn rect(entry: &Entry) -> Result<MapRect, String> {
     })
 }
 impl Ra2Map {
+    /// Decode placed Terrain records without changing the retained INI. Invalid
+    /// records remain explicit errors; they never become wrapped coordinates.
+    pub fn scenery_objects(&self) -> Vec<Result<SceneryObject, String>> {
+        let mut cells = BTreeSet::new();
+        self.ini
+            .section_entries("Terrain")
+            .map(|entry| {
+                let encoded = entry
+                    .key
+                    .parse::<u32>()
+                    .map_err(|_| format!("line {}: invalid scenery cell", entry.line))?;
+                let (x, y) = (encoded % 1000, encoded / 1000);
+                if x >= OVERLAY_SIDE as u32 || y >= OVERLAY_SIDE as u32 {
+                    return Err(format!("line {}: off-grid scenery cell", entry.line));
+                }
+                if !cells.insert((x, y)) {
+                    return Err(format!("line {}: duplicate scenery cell", entry.line));
+                }
+                if entry.value.is_empty()
+                    || entry.value.len() > 64
+                    || !entry
+                        .value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                {
+                    return Err(format!("line {}: invalid scenery type", entry.line));
+                }
+                Ok(SceneryObject {
+                    cell: Cell {
+                        x: x as u16,
+                        y: y as u16,
+                    },
+                    type_id: entry.value.clone(),
+                    line: entry.line,
+                })
+            })
+            .collect()
+    }
     pub fn parse(text: &str) -> Result<Self, String> {
         let ini = Ini::parse(text)?;
         let size = rect(ini.get("Map", "Size").ok_or("missing [Map] Size")?)?;

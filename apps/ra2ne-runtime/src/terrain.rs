@@ -67,6 +67,7 @@ pub struct Terrain {
     images: BTreeMap<(i16, u8), Image>,
     pub report: String,
     pub overlays: Option<super::overlays::Scene>,
+    pub scenery: Option<super::overlays::Scene>,
 }
 impl Terrain {
     pub fn load(
@@ -109,6 +110,17 @@ impl Terrain {
         };
         let overlays = if options.game_dir.is_some() {
             Some(super::overlays::Scene::load(
+                &files,
+                map,
+                map_text,
+                options.edition.unwrap(),
+                encoding,
+            )?)
+        } else {
+            None
+        };
+        let scenery = if options.game_dir.is_some() {
+            Some(super::overlays::Scene::load_scenery(
                 &files,
                 map,
                 map_text,
@@ -208,6 +220,7 @@ impl Terrain {
         eprintln!("{report}");
         Ok(Self {
             overlays,
+            scenery,
             cells,
             images,
             report,

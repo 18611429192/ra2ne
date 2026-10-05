@@ -203,3 +203,10 @@ Transparent helper frames are counted separately. These visuals do not implement
 mining, wall connectivity or bridge navigation. Explicit terrain mounts remain
 terrain-only. See [real-resource validation](docs/REAL_RESOURCE_VALIDATION.md) for
 the six-theater samples and the 11 remaining full-map graphics failures.
+
+Placed `[Terrain]` objects such as trees, street lamps and signs now render in
+directory mode. They resolve through TerrainTypes, rules/art image aliases and
+theater resources, with a separate scenery count and bounded image cache. The
+viewer currently uses frame zero and simple cell sorting; animation, light
+emission, shadows, collision and destruction are pending. Invalid records remain
+in the source INI and are diagnosed rather than becoming usable coordinates.

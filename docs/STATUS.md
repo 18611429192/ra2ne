@@ -525,3 +525,20 @@ The new opt-in strict acceptance test checks all 371 private maps: 360 pass and
 See REAL_RESOURCE_VALIDATION.md for exact map IDs and reproduction. These failures
 remain visible; static overlay support does not establish full-map acceptance,
 original gameplay or a completed 1.0. Overall feature estimate remains about 25%.
+
+## 2026-10-05: placed original scenery
+
+Added typed `[Terrain]` records without adding them to playable actors. Original
+trees, lamps, signs and other registered terrain objects now render through the
+existing bounded SHP path, with their own registry, frame-zero images, drawing
+anchor and diagnostics. Source INI records survive invalid keys, duplicate cells
+and missing type definitions. Drawing considers scenery bounds independently of
+TMP/overlay bounds.
+
+Extended real-map graphics checks resolve all 165,818 scenery records in all 371
+maps; there are no scenery failures or off-terrain references. NewUrban release
+screenshots show trees and lamps; a 120-frame Temperate window run retains the
+previous state hash. 114 regular workspace tests and strict Clippy pass. The
+private whole-map acceptance test still reports the same 11 terrain/overlay
+failures. Scenery collision, animation, shadows, emitted lighting and destruction
+are pending. Full original gameplay and the overall 1.0 estimate remain unchanged.

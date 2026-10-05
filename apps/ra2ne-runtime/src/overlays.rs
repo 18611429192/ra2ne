@@ -1,4 +1,4 @@
-//! Static original overlay SHP frames for the data viewer. No gameplay changes.
+//! Static original overlay and placed scenery SHP frames. No gameplay changes.
 use macroquad::prelude::*;
 use ra2ne_assets::{
     map::{OVERLAY_SIDE, Ra2Map},
@@ -31,8 +31,11 @@ pub struct Statistics {
 }
 impl Statistics {
     pub fn report(&self) -> String {
+        self.report_as("Overlay")
+    }
+    pub fn report_as(&self, label: &str) -> String {
         format!(
-            "Overlay cells: {}; images: {}; unresolved: {}; empty: {}; outside terrain: {}",
+            "{label} cells: {}; images: {}; unresolved: {}; empty: {}; outside terrain: {}",
             self.cells, self.images, self.unresolved, self.empty, self.outside
         )
     }
@@ -45,7 +48,7 @@ pub struct Scene {
 fn load_rules(files: &Vfs, name: &str, encoding: TextEncoding) -> Result<RuleSet, String> {
     let file = files
         .get(name)?
-        .ok_or_else(|| format!("overlay catalogue file missing: {name}"))?;
+        .ok_or_else(|| format!("graphics catalogue file missing: {name}"))?;
     let mut rules = RuleSet::default();
     rules.add_layer(file.source, &encoding.decode(file.bytes)?)?;
     Ok(rules)
@@ -58,6 +61,26 @@ impl Scene {
         edition: super::installation::Edition,
         encoding: TextEncoding,
     ) -> Result<Self, String> {
+        Self::load_kind(files, map, map_text, edition, encoding, false)
+    }
+    pub fn load_scenery(
+        files: &Vfs,
+        map: &Ra2Map,
+        map_text: &str,
+        edition: super::installation::Edition,
+        encoding: TextEncoding,
+    ) -> Result<Self, String> {
+        Self::load_kind(files, map, map_text, edition, encoding, true)
+    }
+    fn load_kind(
+        files: &Vfs,
+        map: &Ra2Map,
+        map_text: &str,
+        edition: super::installation::Edition,
+        encoding: TextEncoding,
+        scenery: bool,
+    ) -> Result<Self, String> {
+        let label = if scenery { "scenery" } else { "overlay" };
         let md = edition == super::installation::Edition::Yr;
         let mut rules = load_rules(
             files,
@@ -66,7 +89,11 @@ impl Scene {
         )?;
         rules.add_layer("map rules overrides", map_text)?;
         let art = load_rules(files, if md { "artmd.ini" } else { "art.ini" }, encoding)?;
-        let catalogue = OverlayCatalog::from_rules(&rules, &art)?;
+        let catalogue = if scenery {
+            OverlayCatalog::from_scenery_rules(&rules, &art)?
+        } else {
+            OverlayCatalog::from_rules(&rules, &art)?
+        };
         for diagnostic in &catalogue.diagnostics {
             eprintln!("{diagnostic}");
         }
@@ -79,37 +106,74 @@ impl Scene {
         let mut cells = BTreeMap::new();
         let mut outside = 0;
         let mut references = BTreeMap::<u8, BTreeMap<u8, usize>>::new();
-        for (index, &id) in map.overlays.iter().enumerate() {
-            if id == 255 {
-                continue;
+        let mut missing = 0;
+        if scenery {
+            let ids = catalogue
+                .types
+                .iter()
+                .enumerate()
+                .filter_map(|(id, t)| {
+                    t.as_ref()
+                        .map(|t| (t.type_id.to_ascii_uppercase(), id as u8))
+                })
+                .collect::<BTreeMap<_, _>>();
+            for record in map.scenery_objects() {
+                let object = match record {
+                    Ok(object) => object,
+                    Err(error) => {
+                        missing += 1;
+                        eprintln!("scenery: {error}");
+                        continue;
+                    }
+                };
+                let cell = (i32::from(object.cell.x), i32::from(object.cell.y));
+                if !terrain_cells.contains(&cell) {
+                    outside += 1;
+                    continue;
+                }
+                let Some(&id) = ids.get(&object.type_id.to_ascii_uppercase()) else {
+                    missing += 1;
+                    eprintln!(
+                        "scenery {} at {cell:?}: type missing or unsupported",
+                        object.type_id
+                    );
+                    continue;
+                };
+                cells.insert(cell, (id, 0));
+                *references.entry(id).or_default().entry(0).or_default() += 1;
             }
-            let cell = ((index % OVERLAY_SIDE) as i32, (index / OVERLAY_SIDE) as i32);
-            if !terrain_cells.contains(&cell) {
-                outside += 1;
-                continue;
+        } else {
+            for (index, &id) in map.overlays.iter().enumerate() {
+                if id == 255 {
+                    continue;
+                }
+                let cell = ((index % OVERLAY_SIDE) as i32, (index / OVERLAY_SIDE) as i32);
+                if !terrain_cells.contains(&cell) {
+                    outside += 1;
+                    continue;
+                }
+                let data = map.overlay_data[index];
+                cells.insert(cell, (id, data));
+                *references.entry(id).or_default().entry(data).or_default() += 1;
             }
-            let data = map.overlay_data[index];
-            cells.insert(cell, (id, data));
-            *references.entry(id).or_default().entry(data).or_default() += 1;
         }
         let mut images = BTreeMap::new();
         let mut palettes = BTreeMap::<&'static str, Palette>::new();
         let mut decoded = 0;
-        let mut missing = 0;
         let mut empty = 0;
         for (id, frames) in references {
             let resolved = match catalogue.resolve(id, environment, files) {
                 Ok(resolved) => resolved,
                 Err(error) => {
                     missing += frames.values().sum::<usize>();
-                    eprintln!("overlay {id}: {error}");
+                    eprintln!("{label} {id}: {error}");
                     continue;
                 }
             };
             if !palettes.contains_key(resolved.palette) {
                 let Some(file) = files.get(resolved.palette)? else {
                     missing += frames.values().sum::<usize>();
-                    eprintln!("overlay {id}: palette missing: {}", resolved.palette);
+                    eprintln!("{label} {id}: palette missing: {}", resolved.palette);
                     continue;
                 };
                 palettes.insert(resolved.palette, Palette::parse(file.bytes)?);
@@ -120,7 +184,7 @@ impl Scene {
                     Ok(image) => image,
                     Err(error) => {
                         missing += count;
-                        eprintln!("overlay {id}/{frame} ({}): {error}", resolved.filename);
+                        eprintln!("{label} {id}/{frame} ({}): {error}", resolved.filename);
                         continue;
                     }
                 };
@@ -130,7 +194,7 @@ impl Scene {
                 }
                 decoded += image.pixels.len() * 4;
                 if decoded > IMAGE_BUDGET {
-                    return Err("overlay RGBA cache exceeds 128 MiB".into());
+                    return Err(format!("{label} RGBA cache exceeds 128 MiB"));
                 }
                 let offset = resolved.geometry.offset(frame, image.width, image.height);
                 images.insert(
@@ -151,7 +215,10 @@ impl Scene {
             empty,
             outside,
         };
-        eprintln!("{}", statistics.report());
+        eprintln!(
+            "{}",
+            statistics.report_as(if scenery { "Scenery" } else { "Overlay" })
+        );
         Ok(Self {
             cells,
             images,
@@ -248,6 +315,57 @@ mod tests {
         }
         map.overlays[511 * OVERLAY_SIDE + 511] = 0;
         map
+    }
+    #[test]
+    fn scenery_uses_named_types_native_palette_and_preserves_invalid_records() {
+        let mut files = Vfs::default();
+        let mut palette = vec![0; 768];
+        palette[7 * 3..7 * 3 + 3].copy_from_slice(&[1, 2, 3]);
+        files
+            .mount(
+                "synthetic",
+                vec![
+                    (
+                        "rulesmd.ini".into(),
+                        b"[TerrainTypes]\n10=TREE\n[TREE]\nImage=ART".to_vec(),
+                    ),
+                    (
+                        "artmd.ini".into(),
+                        b"[ART]\nImage=ALIAS\nTheater=yes".to_vec(),
+                    ),
+                    ("ALIAS.tem".into(), shp()),
+                    ("isotem.pal".into(), palette),
+                    ("unittem.pal".into(), vec![63; 768]),
+                ],
+            )
+            .unwrap();
+        let mut map = map();
+        map.ini = Ini::parse(
+            "[Terrain]\n3002=tree\n3003=TREE\n3004=UNKNOWN\n003002=TREE\n512001=TREE\n511511=TREE",
+        )
+        .unwrap();
+        let scene = Scene::load_scenery(
+            &files,
+            &map,
+            "",
+            super::super::installation::Edition::Yr,
+            TextEncoding::Utf8,
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                scene.statistics.cells,
+                scene.statistics.images,
+                scene.statistics.unresolved,
+                scene.statistics.outside
+            ),
+            (2, 1, 3, 1)
+        );
+        let image = &scene.images[&(0, 0)];
+        assert_eq!(image.offset, (-2, -4));
+        assert_eq!(&image.rgba[5 * 4..6 * 4], &[4, 8, 12, 255]);
+        assert_eq!(map.ini.section_entries("Terrain").count(), 6);
+        assert_eq!(map.overlays[3 * OVERLAY_SIDE + 2], 0);
     }
     #[test]
     fn map_overrides_frame_identity_palette_and_off_map_cells_are_preserved() {

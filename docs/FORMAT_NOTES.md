@@ -234,3 +234,22 @@ bridge/track offsets and culls by image bounds. Fully transparent frames and
 references outside decoded terrain cells are counted separately. Source arrays
 are preserved. RGBA caching is bounded to 128 MiB. Animation, damage selection,
 per-pixel depth, remap/shadows and gameplay remain pending.
+
+## Placed scenery records and drawing anchor
+
+`[Terrain]` records encode the cell as `1000*y+x` in the INI key and the named
+TerrainTypes ID in the value. RA2NE exposes typed scenery records separately from
+playable actors and retains the original INI. Coordinates must fit the 512x512
+storage grid, image/type names are bounded, and duplicate cells are diagnosed
+including differently formatted decimal keys. The graphics loader also checks
+that the cell exists in decoded terrain before drawing it.
+
+Static scenery shares stock image aliases, theater resource/palette lookup and
+bounded decoding with overlays, but uses its own TerrainTypes registry and frame
+zero. Both catalogues currently support at most 255 registered entries. The
+[EA drawing code](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/MissionEditor/IsoView.cpp)
+centers terrain-object canvases with a three-pixel vertical adjustment; RA2NE's
+offset from the projected cell center is `(-width/2, -height/2-3)`.
+The renderer tests the full image bounds independently of the cell's TMP bounds,
+so tall trees remain drawable while their cell anchor is outside the viewport.
+This is static drawing, not original per-pixel depth or terrain-object gameplay.

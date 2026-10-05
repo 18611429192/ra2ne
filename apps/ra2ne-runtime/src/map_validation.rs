@@ -67,6 +67,10 @@ fn all_private_map_graphics_resolve_and_decode() {
     let mut empty_cells = 0;
     let mut outside_cells = 0;
     let mut overlay_images = 0;
+    let mut scenery_cells = 0;
+    let mut scenery_images = 0;
+    let mut scenery_failures = 0;
+    let mut scenery_outside = 0;
     for (environment, paths) in groups {
         let (catalogue, _, files) =
             installation::load(&game, edition, &environment, encoding).unwrap();
@@ -80,6 +84,27 @@ fn all_private_map_graphics_resolve_and_decode() {
                     .or_default()
                     .insert(tile.sub_tile);
             }
+            let scenery = overlays::Scene::load_scenery(&files, &map, &text, edition, encoding);
+            let scenery_error = match scenery {
+                Ok(scene) => {
+                    scenery_cells += scene.statistics.cells;
+                    scenery_images += scene.statistics.images;
+                    scenery_outside += scene.statistics.outside;
+                    if scene.statistics.unresolved > 0 {
+                        scenery_failures += 1;
+                        Some(format!(
+                            "{} unresolved scenery records",
+                            scene.statistics.unresolved
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                Err(error) => {
+                    scenery_failures += 1;
+                    Some(error)
+                }
+            };
             let check = (|| -> Result<(), String> {
                 for (id, subtiles) in tiles {
                     let resolved = catalogue
@@ -124,8 +149,15 @@ fn all_private_map_graphics_resolve_and_decode() {
                 }
                 Ok(())
             })();
+            let mut errors = Vec::new();
             if let Err(error) = check {
-                failures.push(format!("{}: {error}", path.display()));
+                errors.push(error);
+            }
+            if let Some(error) = scenery_error {
+                errors.push(error);
+            }
+            if !errors.is_empty() {
+                failures.push(format!("{}: {}", path.display(), errors.join("; ")));
             }
         }
         println!(
@@ -138,6 +170,9 @@ fn all_private_map_graphics_resolve_and_decode() {
         "map_graphics_maps={}; terrain_images={terrain_images}; overlay_cells={overlay_cells}; overlay_images={overlay_images}; empty_overlay_cells={empty_cells}; outside_overlay_cells={outside_cells}; failures={}",
         paths.len(),
         failures.len()
+    );
+    println!(
+        "map_scenery_cells={scenery_cells}; images={scenery_images}; outside={scenery_outside}; failing_maps={scenery_failures}"
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

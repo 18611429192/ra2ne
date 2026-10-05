@@ -1,4 +1,4 @@
-//! Original map overlay catalogue and SHP lookup. This is graphics metadata,
+//! Original map overlay/scenery catalogues and SHP lookup. This is graphics metadata,
 //! not wall connectivity, ore growth, bridge navigation or gameplay.
 use crate::{rules::RuleSet, sprite::Shp, vfs::Vfs};
 use std::sync::Arc;
@@ -79,6 +79,7 @@ pub enum Geometry {
     HighBridge,
     GroundAligned,
     Veinhole,
+    Scenery,
 }
 impl Geometry {
     /// Pixel offset from the cell's projected center. SHP frame() retains the
@@ -91,6 +92,7 @@ impl Geometry {
             Self::HighBridge => (x - 1, y - if (9..=17).contains(&data) { 15 } else { 0 }),
             Self::GroundAligned => (x, y + 15),
             Self::Veinhole => (x, y - 45),
+            Self::Scenery => (x, y + 12),
         }
     }
 }
@@ -131,9 +133,22 @@ fn flag(rules: &RuleSet, section: &str, key: &str) -> Result<bool, &'static str>
 }
 impl OverlayCatalog {
     pub fn from_rules(rules: &RuleSet, art: &RuleSet) -> Result<Self, &'static str> {
-        let entries = rules.section("OverlayTypes");
+        Self::from_registry(rules, art, "OverlayTypes", false)
+    }
+    /// Static placed terrain objects share image aliases and theater lookup,
+    /// but use their own registry and drawing anchor.
+    pub fn from_scenery_rules(rules: &RuleSet, art: &RuleSet) -> Result<Self, &'static str> {
+        Self::from_registry(rules, art, "TerrainTypes", true)
+    }
+    fn from_registry(
+        rules: &RuleSet,
+        art: &RuleSet,
+        registry: &str,
+        scenery: bool,
+    ) -> Result<Self, &'static str> {
+        let entries = rules.section(registry);
         if entries.is_empty() || entries.len() > 255 {
-            return Err("overlay registry must contain 1..255 entries (255 means no overlay)");
+            return Err("graphics registry must contain 1..255 entries");
         }
         let mut types = Vec::with_capacity(entries.len());
         let mut diagnostics = Vec::new();
@@ -159,7 +174,9 @@ impl OverlayCatalog {
                     || flag(rules, type_id, "IsVeins")?
                     || flag(rules, type_id, "IsVeinholeMonster")?;
                 let upper = type_id.to_ascii_uppercase();
-                let geometry = if flag(rules, type_id, "IsVeinholeMonster")? {
+                let geometry = if scenery {
+                    Geometry::Scenery
+                } else if flag(rules, type_id, "IsVeinholeMonster")? {
                     Geometry::Veinhole
                 } else if ["BRIDGE1", "BRIDGE2", "BRIDGEB1", "BRIDGEB2"].contains(&upper.as_str()) {
                     Geometry::HighBridge
@@ -188,7 +205,7 @@ impl OverlayCatalog {
                 Err(error) => {
                     types.push(None);
                     diagnostics.push(format!(
-                        "overlay {id} ({}:{}): {error}",
+                        "{registry} entry {id} ({}:{}): {error}",
                         entry.source, entry.entry.line
                     ));
                 }
@@ -367,5 +384,6 @@ mod tests {
         assert_eq!(Geometry::HighBridge.offset(18, 60, 60), (-31, -45));
         assert_eq!(Geometry::GroundAligned.offset(0, 60, 60), (-30, -30));
         assert_eq!(Geometry::Veinhole.offset(0, 60, 60), (-30, -90));
+        assert_eq!(Geometry::Scenery.offset(0, 60, 60), (-30, -33));
     }
 }

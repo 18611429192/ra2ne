@@ -429,6 +429,9 @@ impl Scene {
             if let Some(overlays) = &terrain.overlays {
                 messages.push(overlays.statistics.report());
             }
+            if let Some(scenery) = &terrain.scenery {
+                messages.push(scenery.statistics.report_as("Scenery"));
+            }
         }
         tiles.sort_by_key(|(cell, _)| (cell.x + cell.y, cell.x));
         Ok(Self {
@@ -566,6 +569,12 @@ async fn run(options: Options, mut scene: Scene) {
         .terrain
         .as_ref()
         .and_then(|t| t.overlays.as_ref())
+        .map(overlays::Scene::textures)
+        .unwrap_or_default();
+    let scenery_textures = scene
+        .terrain
+        .as_ref()
+        .and_then(|t| t.scenery.as_ref())
         .map(overlays::Scene::textures)
         .unwrap_or_default();
     let texture = scene.sprite.as_ref().map(|(shp, pal)| {
@@ -755,11 +764,19 @@ async fn run(options: Options, mut scene: Scene) {
                 .as_ref()
                 .and_then(|t| t.overlays.as_ref())
                 .and_then(|o| o.texture((p.x, p.y), &overlay_textures));
-            let overlay_bounds = overlay_image.map(|image| {
-                (
-                    pos + vec2(image.offset.0 as f32, image.offset.1 as f32) * view.zoom,
-                    vec2(image.texture.width(), image.texture.height()) * view.zoom,
-                )
+            let scenery_image = scene
+                .terrain
+                .as_ref()
+                .and_then(|t| t.scenery.as_ref())
+                .and_then(|o| o.texture((p.x, p.y), &scenery_textures));
+            let decorations = [overlay_image, scenery_image].map(|image| {
+                image.map(|image| {
+                    (
+                        image,
+                        pos + vec2(image.offset.0 as f32, image.offset.1 as f32) * view.zoom,
+                        vec2(image.texture.width(), image.texture.height()) * view.zoom,
+                    )
+                })
             });
             let in_view = |origin: macroquad::math::Vec2, size: macroquad::math::Vec2| {
                 origin.x + size.x >= 0.0
@@ -768,9 +785,11 @@ async fn run(options: Options, mut scene: Scene) {
                     && origin.y <= screen_height()
             };
             let terrain_visible = in_view(origin, size);
-            let overlay_visible =
-                overlay_bounds.is_some_and(|(origin, size)| in_view(origin, size));
-            if !terrain_visible && !overlay_visible {
+            let decoration_visible = decorations
+                .iter()
+                .flatten()
+                .any(|(_, origin, size)| in_view(*origin, *size));
+            if !terrain_visible && !decoration_visible {
                 continue;
             }
             let tint = if (p.x + p.y) % 2 == 0 {
@@ -792,20 +811,19 @@ async fn run(options: Options, mut scene: Scene) {
             } else if terrain_visible {
                 diamond(pos, 60.0 * view.zoom, 30.0 * view.zoom, tint);
             }
-            if overlay_visible
-                && let Some(image) = overlay_image
-                && let Some((origin, size)) = overlay_bounds
-            {
-                draw_texture_ex(
-                    &image.texture,
-                    origin.x,
-                    origin.y,
-                    WHITE,
-                    DrawTextureParams {
-                        dest_size: Some(size),
-                        ..Default::default()
-                    },
-                );
+            for (image, origin, size) in decorations.into_iter().flatten() {
+                if in_view(origin, size) {
+                    draw_texture_ex(
+                        &image.texture,
+                        origin.x,
+                        origin.y,
+                        WHITE,
+                        DrawTextureParams {
+                            dest_size: Some(size),
+                            ..Default::default()
+                        },
+                    );
+                }
             }
             if let Simulation::Battle(game) = &scene.world
                 && game.resource(p) > 0
