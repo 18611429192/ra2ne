@@ -1,3 +1,6 @@
 /target/
 **/*.rs.bk
 .DS_Store
+.opencode/ralph-loop.local.md
+Ra2Game412/
+Ra2Game412.7z
