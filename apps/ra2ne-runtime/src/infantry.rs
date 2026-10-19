@@ -106,8 +106,8 @@ impl Scene {
                 }
                 let shp = &sprites[&name];
                 let remap_enabled = remap::enabled(&rules, &art, &object.type_id);
-                let owner_color = match if remap_enabled {
-                    remap::house_color(&rules, &object.house)
+                let owner_hsv = match if remap_enabled {
+                    remap::house_hsv(&rules, &object.house)
                 } else {
                     Ok(None)
                 } {
@@ -117,9 +117,9 @@ impl Scene {
                         None
                     }
                 };
-                let cache_name = owner_color.map_or_else(
+                let cache_name = owner_hsv.map_or_else(
                     || name.clone(),
-                    |rgb| format!("{name}@{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]),
+                    |hsv| format!("{name}@{:02x}{:02x}{:02x}", hsv[0], hsv[1], hsv[2]),
                 );
                 let key = (cache_name, frame);
                 if !scene.images.contains_key(&key) {
@@ -133,9 +133,8 @@ impl Scene {
                         Image {
                             width: image.width,
                             height: image.height,
-                            rgba: owner_color
-                                .map(|rgb| remap::palette(&palette, [16, 31], rgb))
-                                .transpose()?
+                            rgba: owner_hsv
+                                .map(|hsv| remap::palette(&palette, hsv))
                                 .as_ref()
                                 .unwrap_or(&palette)
                                 .rgba(&image, true),
