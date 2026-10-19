@@ -697,3 +697,37 @@ placeholders. Capture commands are recorded in REAL_RESOURCE_VALIDATION.md.
 
 Verification: 129 workspace tests pass, 3 ignored original-resource acceptance
 tests; clippy with denied warnings, formatting and the release build pass.
+
+## 2026-10-19: VXL normal lighting and the VPL section tables
+
+Voxel previews are no longer unlit. REA on `gamemd.exe` recovered the whole
+engine shading path: four normal tables (16/36/64/245 entries for the limb
+normal-generation byte; pointers at `0x8469e4`, data at
+`0x846a08`/`0x846ac8`/`0x846c78`/`0x846f78`), a light direction computed once at
+startup (`FUN_00754c00` rotates `(-1/√2, -1/√2, 0)` about index-Y by `0.785375`
+from `0x7e1e68`; there is no INI or map `[Lighting]` input for voxels), the
+per-model shade table `FUN_007586f0`
+(`round(16·(max(0,n·L) + max(0,n·H/(3−2·n·H))))` with `H = normalize(L+U)`) and
+the draw lookup `sections[shade·256 + colour]` at `0x7576b9`–`0x7576e5` into the
+`voxels.vpl` buffer at `0xb41178`.
+
+Implemented: `normals.rs` (transcribed tables plus light direction and the 16×
+scale, with unit-length and light-vector tests), `vpl.rs` (bounded parsing of
+the 16-byte header, 768-byte palette and up-to-32×256 sections) and shading in
+`voxel_render.rs` (the light is inverse-rotated by the yaw and the limb
+transform; the vehicle viewer and resource demo pass the shipped VPL). Two
+documented deviations: sections equal to the section count (an exact
+`diffuse+specular` of 2.0) clamp to the last table instead of reading past the
+buffer, and the engine's extra world-to-model translation term is not applied to
+the light. The engine's `0xb45a8d/e/f = 0x10` writes remain unexplained.
+
+Acceptance: the new ignored test `stock_voxels_shade_through_engine_tables_and_vpl`
+parses the stock `voxels.vpl` (8976 bytes, 32 sections, remap 16..=31) and shades
+ten stock models — 93,247 voxels, generations {2, 4}, every normal inside its
+table, and every drawn pixel equal to the section colour derived from the
+model's own voxels (switching to identity sections reproduces the unlit
+preview, so the difference is shading alone). Details in `REA_SETUP.md` and
+`FORMAT_NOTES.md`; the run is recorded in `REAL_RESOURCE_VALIDATION.md`.
+
+Verification: 135 workspace tests pass (4 ignored original-resource acceptance
+tests); clippy with denied warnings, formatting and the release build pass.

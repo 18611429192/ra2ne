@@ -364,8 +364,10 @@ limb scale/bounds/local transform, dimensions and normal mode/indices.
 
 Reads are limited to 64 MiB, 256 limbs and 4,194,304 decoded voxels. Transforms,
 scale and bounds must be finite; scale must be positive and bounds ordered.
-Normal indices/modes are retained without interpreting lighting tables yet.
-The decoder has no original-game rasterization, normal lighting or shading.
+Normal indices select an entry of the four engine normal tables (16, 36, 64 or
+245 entries for the limb's normal generation byte); the lighting section below
+covers how the engine turns that into a colour. The decoder itself performs no
+rasterization.
 
 HVA has a 24-byte header, 16-byte section names and 48-byte 3x4 matrices.
 The [OpenRA HVA reader](https://github.com/OpenRA/OpenRA/blob/bleed/OpenRA.Mods.Cnc/FileFormats/HvaReader.cs)
@@ -384,3 +386,32 @@ probe.hva is a 24-byte, one-frame, zero-section placeholder. It parses and is
 counted separately, but cannot bind to a nonempty model or supply a matrix.
 Anonymous HVA detection requires a nonempty section table and an exact size;
 unknown resources are retained in audit coverage rather than assumed to be HVA.
+
+## Voxel normal lighting and VPL sections
+
+`gamemd.exe` keeps four normal tables for the VXL normal generations
+(16/36/64/245 float triples at `0x846a08`, `0x846ac8`, `0x846c78`, `0x846f78`,
+pointers at `0x8469e4`, counts at `0x8469f8`; the RA2 tables are generations 2
+and 4). The light direction is a fixed world vector built once at startup
+(`FUN_00754c00`: `(-1/sqrt(2), -1/sqrt(2), 0)` rotated about index-Y by
+`0.785375`), so RA2NE folds it into
+`crates/ra2ne-assets/src/normals.rs` together with the 16x section scale and no
+longer needs an INI or map `[Lighting]` input for voxel shading.
+
+For each drawn model the engine builds a shade byte per normal
+(`FUN_007586f0`): with `L` and `U` the world-to-model transforms of the light
+and of `(0, 0, 1)`, `H = normalize(L + U)`,
+`diffuse = max(0, n·L)`, `specular = max(0, n·H / (3 - 2·n·H))` and
+`shade = round(16 · (diffuse + specular))`. The draw step (`0x7576b9`–`0x7576e5`)
+then uses `shade` as a section and the voxel's colour byte as the row index into
+the section buffer at `0xb41178` (`sections[shade · 256 + colour]`).
+
+`voxels.vpl` supplies those sections: a 16-byte header (first/last remap colour,
+section count, reserved), a 768-byte 8-bit palette the engine ignores, and
+`section count` tables of 256 bytes. The stock file is 8976 bytes with 32
+sections and the remap range 16..=31. Sections equal to the section count (a
+full `diffuse + specular` of 2.0) would read one table past the buffer in the
+engine; RA2NE clamps those to the last section. The engine additionally feeds
+the world-to-model matrix translation into the light transform; RA2NE applies
+only the rotation (`Tᵀ · flip_y · R_yaw⁻¹`, mirroring the engine's transposed
+world-to-model matrix).

@@ -86,3 +86,15 @@ the gaps (movie/per-side/WDT packs, disk `RULEMD*.INI` merge layers) are
 documented instead of guessed at. The 371-map acceptance re-run produced
 byte-identical totals with 0 failing maps, confirming the wider mount set
 changes no resolution outcome.
+
+VXL previews now reproduce the original engine's normal lighting. REA recovered
+the four generation normal tables, the fixed startup light direction, the
+per-model shade table (`round(16·(max(0,n·L) + max(0,n·H/(3−2·n·H))))`) and the
+`voxels.vpl` section lookup the draw loop performs, so the previews shade with
+the shipped tables instead of the raw voxel colours. Stock acceptance shades ten
+models (93,247 voxels, generations 2 and 4) and requires every drawn pixel to
+match the section derived from the model's own voxels. Two engine details remain
+unreproduced (the translated light transform and the out-of-buffer section read)
+and are documented as gaps; owner remap, shadows, attachment calibration and
+original gameplay integration remain pending. Overall coverage remains
+approximately 25%.

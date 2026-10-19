@@ -352,3 +352,22 @@ placeholders; state hashes match earlier smoke runs for identical options.
 The captures, a 68 s 1080p showcase video and a six-theater poster were
 assembled outside the repository (ffmpeg) under /tmp/opencode/showcase and are
 not committed because they contain rendered original assets.
+
+## Voxel shading acceptance (2026-10-19)
+
+```
+RA2NE_GAME_DIR=Ra2Game412 RA2NE_EDITION=yr RA2NE_MAP_ENCODING=windows1252 \
+cargo test -p ra2ne-runtime stock_voxels_shade_through_engine_tables_and_vpl \
+  -- --ignored --nocapture
+```
+
+`voxel_shading_models=10; voxels=93247; shaded=10; generations={2, 4}` — the
+stock `voxels.vpl` is 8976 bytes (16-byte header `16, 31, 32, 0xCDCDCDCD` +
+768-byte palette + 32×256 sections) and parses; all 93,247 voxels of the ten
+checked stock models (`htnk`, `mtnk`, `ttnk`, `fv`, `sref`, `hvr`, `v3`, `hind`,
+`zep`, `shad`) stay inside their generation's normal table (generations 2 and 4
+only). Rendering with the shipped sections differs from rendering with identity
+sections, and every drawn pixel equals the section colour derived from the
+model's own voxels under the engine terms
+(`round(16·(max(0,n·L) + max(0,n·H/(3−2·n·H))))`), so the preview visits the
+same table rows the original engine's draw loop would.

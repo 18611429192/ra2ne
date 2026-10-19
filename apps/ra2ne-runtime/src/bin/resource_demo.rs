@@ -6,7 +6,8 @@ use ra2ne_assets::{
     sprite::{Palette, Shp},
     vfs::Vfs,
     voxel::{Hva, Vxl},
-    voxel_render::{self, Component},
+    voxel_render::{self, Component, Shading},
+    vpl::Vpl,
 };
 use std::{path::Path, sync::Arc};
 fn config() -> Conf {
@@ -69,6 +70,13 @@ async fn main() {
     }
     let palette =
         Palette::parse(&std::fs::read(Path::new(&args[0]).join("unittem.pal")).unwrap()).unwrap();
+    // `voxels.vpl` holds the 32 section tables the engine uses to expose each
+    // voxel colour under the rounded diffuse+specular lighting term.
+    let vpl = files
+        .get("voxels.vpl")
+        .unwrap()
+        .map(|file| Vpl::parse(file.bytes).expect("voxels.vpl"));
+    let shading = vpl.as_ref().map(|vpl| Shading { vpl });
     let mut art = RuleSet::default();
     art.add_layer(
         "art",
@@ -154,7 +162,7 @@ async fn main() {
                     },
                 })
                 .collect::<Vec<_>>();
-            let raster = voxel_render::render(&components).unwrap();
+            let raster = voxel_render::render(&components, shading.as_ref()).unwrap();
             let t = texture(&raster.image, &palette);
             let cx = 350. + i as f32 * 580.;
             let cy = 270.;

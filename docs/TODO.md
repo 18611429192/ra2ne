@@ -48,8 +48,28 @@ ordinary INI mods. Synthetic tests alone cannot satisfy this target.
 
 ## P1 — Finish original-resource rendering
 
-- [ ] **Voxel normal lighting** (currently unlit CPU rasterizer; no normal
-  tables copied — derive from game behavior/documentation).
+- [x] **Voxel normal lighting** — resolved 2026-10-19. REA on `gamemd.exe` gives
+  the complete engine model: four normal tables (16/36/64/245 entries for VXL
+  normal generations 1–4, pointers at 0x8469e4, data at 0x846a08/0x846ac8/
+  0x846c78/0x846f78) and a fixed world light direction built once at startup
+  (`FUN_00754c00`: the base vector (-1/√2, -1/√2, 0) pushed as 0xbf3504e6 is
+  rotated about index-Y by the constant 0.785375 at 0x7e1e68 — no INI or
+  `[Lighting]` input; `FUN_005af080`/`FUN_005afb80`). `FUN_007586f0` transforms
+  the light and the up vector (0, 0, 1) into model space, builds
+  `H = normalize(L + U)` and fills a per-model shade byte with
+  `round(16 · (max(0, n·L) + max(0, n·H / (3 − 2·n·H))))` (normalise/divide at
+  0x7586fd–0x758732, specular denominator 0x7587e3, clamp 0x7587f9–0x758823,
+  16× scale 0x7f6960); the voxel draw at 0x7576b9 then reads
+  `sections[shade · 256 + voxel colour]` from `voxels.vpl` (buffer 0xb41178).
+  `normals.rs` transcribes the tables (verified unit-length, cross-checked
+  against the read-back bytes), `vpl.rs` parses the 16-byte header + 768-byte
+  palette + up-to-32×256 section tables, and `voxel_render.rs` reproduces the
+  formula (inverse-rotating the light by the yaw and the limb transform; the
+  engine's extra matrix translation term is not reproduced). Stock acceptance
+  (`stock_voxels_shade_through_engine_tables_and_vpl`) checks 10 stock voxels
+  (93,247 voxel pixels, generations 2 and 4): every normal stays inside its
+  generation table and every rendered pixel matches the section colour derived
+  from the model's own voxels.
 - [ ] Stock gradient/lighting calibration for remap colors; original saturation
   curves.
 - [ ] Numeric multiplayer color assignments for house color previews.
@@ -125,8 +145,12 @@ workflow. Prioritized list:
   (`--rule-rof`), building construction times.
 - [ ] **Damage math**: rounding and minimum-damage semantics for Verses scaled
   damage; verify against P2 work.
-- [ ] **Voxel lighting**: how the original computes voxel normals/lighting
-  (`[Lighting]`, `UseNormal`, ambient values).
+- [x] **Voxel lighting**: answered 2026-10-19 (see the P1 entry and REA_SETUP.md
+  citations FUN_00754c00, FUN_00758670, FUN_007586f0, FUN_005afc20, FUN_005af4d0).
+  The engine uses a fixed light direction and the four generation normal
+  tables; there is no `[Lighting]`/`UseNormal` ambient input for voxels (the
+  three bytes 0xb45a8d/e/f are set to the 16 section scale and stay
+  unexplained).
 - [ ] **House color curves**: original remap/saturation for the 8+ multiplayer
   color numbers.
 - [ ] **Terrain passability**: which tile/overlay flags make cells walkable;

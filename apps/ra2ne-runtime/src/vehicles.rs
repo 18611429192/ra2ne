@@ -1,4 +1,4 @@
-//! Experimental unlit VXL vehicles, preserving map actor IDs.
+//! Experimental normal-lit VXL vehicles, preserving map actor IDs.
 use macroquad::prelude::*;
 use ra2ne_assets::{
     map::{ObjectKind, Ra2Map},
@@ -9,7 +9,8 @@ use ra2ne_assets::{
     text::TextEncoding,
     vfs::Vfs,
     voxel::{Hva, Vxl},
-    voxel_render::{self, Component},
+    voxel_render::{self, Component, Shading},
+    vpl::Vpl,
 };
 use std::collections::BTreeMap;
 struct Image {
@@ -73,6 +74,16 @@ impl Scene {
                 .ok_or("vehicle unit palette missing")?
                 .bytes,
         )?;
+        // The engine shades every voxel through `voxels.vpl` (section tables);
+        // without it the preview keeps the raw voxel colours.
+        let vpl = match files.get("voxels.vpl")? {
+            Some(file) => Some(Vpl::parse(file.bytes)?),
+            None => {
+                eprintln!("voxels.vpl missing; drawing unlit voxels");
+                None
+            }
+        };
+        let shading = vpl.as_ref().map(|vpl| Shading { vpl });
         let heights = map
             .tiles
             .iter()
@@ -156,7 +167,7 @@ impl Scene {
                             }
                         })
                         .collect::<Vec<_>>();
-                    let raster = voxel_render::render(&components)?;
+                    let raster = voxel_render::render(&components, shading.as_ref())?;
                     bytes += raster.image.pixels.len() * 4;
                     if bytes > 128 * 1024 * 1024 {
                         return Err("vehicle RGBA budget exceeded".into());

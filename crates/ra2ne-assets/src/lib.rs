@@ -5,6 +5,7 @@ pub mod infantry;
 pub mod ini;
 pub mod map;
 pub mod mix;
+pub mod normals;
 pub mod overlay;
 pub mod pack;
 pub mod rules;
@@ -15,5 +16,6 @@ pub mod tmp;
 pub mod vfs;
 pub mod voxel;
 pub mod voxel_render;
+pub mod vpl;
 
 pub mod remap;

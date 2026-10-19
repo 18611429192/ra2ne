@@ -1,7 +1,16 @@
 //! Opt-in acceptance check against user-owned maps and stock resources.
 //! CI never needs or distributes original game files.
 use super::{installation, overlays, read};
-use ra2ne_assets::{map::Ra2Map, sprite::Palette, text::TextEncoding, theater::ResolvedTile};
+use ra2ne_assets::{
+    map::Ra2Map,
+    normals,
+    sprite::Palette,
+    text::TextEncoding,
+    theater::ResolvedTile,
+    voxel::{Hva, Vxl},
+    voxel_render,
+    vpl::Vpl,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -413,4 +422,115 @@ fn freeze_map_no_image_expectations() {
     std::fs::write("tests/data/map_no_image_expected.tsv", &table).unwrap();
     println!("wrote {} no-image references", table.lines().count() - 4);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+/// Stock voxels must stay inside their generation's normal table and shade
+/// through the shipped `voxels.vpl` section tables.
+#[test]
+#[ignore = "requires RA2NE_GAME_DIR containing user-owned resources"]
+fn stock_voxels_shade_through_engine_tables_and_vpl() {
+    let game = std::env::var("RA2NE_GAME_DIR").expect("set RA2NE_GAME_DIR");
+    let edition = installation::Edition::parse(
+        &std::env::var("RA2NE_EDITION").unwrap_or_else(|_| "yr".into()),
+    )
+    .unwrap();
+    let encoding = TextEncoding::parse(
+        &std::env::var("RA2NE_MAP_ENCODING").unwrap_or_else(|_| "windows1252".into()),
+    )
+    .unwrap();
+    let (_, _, files) = installation::load(&game, edition, "TEMPERATE", encoding).unwrap();
+    let raw = files.get("voxels.vpl").unwrap().expect("stock voxels.vpl");
+    assert_eq!(raw.bytes.len(), 16 + 768 + 32 * 256);
+    let vpl = Vpl::parse(raw.bytes).expect("voxels.vpl layout");
+    assert_eq!(vpl.section_count(), 32);
+    assert_eq!(vpl.remap, [16, 31]);
+    assert_eq!(vpl.palette[0], [0, 0, 0]);
+    // Identity sections reproduce the raw voxel colours; the shipped tables
+    // must differ from that, otherwise shading would be a no-op.
+    let mut identity = Vec::new();
+    identity.extend_from_slice(&16u32.to_le_bytes());
+    identity.extend_from_slice(&31u32.to_le_bytes());
+    identity.extend_from_slice(&32u32.to_le_bytes());
+    identity.extend_from_slice(&0u32.to_le_bytes());
+    identity.extend(std::iter::repeat_n(0u8, 768));
+    for _ in 0..32u32 {
+        identity.extend(0..=255u8);
+    }
+    let identity = Vpl::parse(&identity).unwrap();
+    let mut models = 0;
+    let mut voxels = 0;
+    let mut shaded_models = 0;
+    let mut generations = BTreeSet::new();
+    for name in [
+        "htnk", "mtnk", "ttnk", "fv", "sref", "hvr", "v3", "hind", "zep", "shad",
+    ] {
+        let Some(file) = files.get(&format!("{name}.vxl")).unwrap() else {
+            continue;
+        };
+        let model = Vxl::parse(file.bytes).unwrap_or_else(|e| panic!("{name}.vxl: {e}"));
+        models += 1;
+        for limb in &model.limbs {
+            let table = normals::table(limb.normal_mode)
+                .unwrap_or_else(|| panic!("{name}: normal generation {}", limb.normal_mode));
+            generations.insert(limb.normal_mode);
+            for voxel in &limb.voxels {
+                assert!(
+                    usize::from(voxel.normal) < table.len(),
+                    "{name}: normal {} outside the {}-entry generation {} table",
+                    voxel.normal,
+                    table.len(),
+                    limb.normal_mode
+                );
+            }
+            voxels += limb.voxels.len();
+        }
+        let Some(pose_file) = files.get(&format!("{name}.hva")).unwrap() else {
+            continue;
+        };
+        let pose = Hva::parse(pose_file.bytes).unwrap_or_else(|e| panic!("{name}.hva: {e}"));
+        let yaw = 0.5;
+        let components = [voxel_render::Component {
+            model: &model,
+            pose: &pose,
+            frame: 0,
+            yaw,
+        }];
+        let unlit = voxel_render::render(&components, None).unwrap();
+        let plain =
+            voxel_render::render(&components, Some(&voxel_render::Shading { vpl: &identity }))
+                .unwrap();
+        assert_eq!(plain.image.pixels, unlit.image.pixels, "{name}: identity");
+        let lit =
+            voxel_render::render(&components, Some(&voxel_render::Shading { vpl: &vpl })).unwrap();
+        assert_eq!(lit.image.pixels.len(), unlit.image.pixels.len());
+        assert_ne!(
+            lit.image.pixels, unlit.image.pixels,
+            "{name}: shipped sections did not change the preview"
+        );
+        // Every drawn pixel must match the section one of this model's own
+        // voxels resolves to under the engine's shading terms.
+        let mut expected = BTreeSet::new();
+        for limb in &model.limbs {
+            let table = normals::table(limb.normal_mode).unwrap();
+            let (light, up) = voxel_render::limb_light(yaw, &limb.transform);
+            for voxel in &limb.voxels {
+                if voxel.color == 0 {
+                    continue;
+                }
+                let section = voxel_render::section(table[usize::from(voxel.normal)], light, up);
+                expected.insert(vpl.shade(section, voxel.color));
+            }
+        }
+        for pixel in &lit.image.pixels {
+            assert!(
+                *pixel == 0 || expected.contains(pixel),
+                "{name}: pixel {pixel} outside the expected section colours"
+            );
+        }
+        shaded_models += 1;
+    }
+    assert!(models >= 8, "only {models} stock voxels found");
+    assert!(shaded_models >= 6, "only {shaded_models} voxels shaded");
+    println!(
+        "voxel_shading_models={models}; voxels={voxels}; shaded={shaded_models}; generations={generations:?}"
+    );
 }
