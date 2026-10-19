@@ -292,3 +292,37 @@ overlay frame selection still uses the stored data byte where the original
 computes frames from cell coordinates; the rubble overlay (`IsRubble`) object
 image path is not modeled; overlay/scenery animation, damage states and
 per-pixel depth remain pending.
+
+## Engine mount search order aligned and re-verified (2026-10-19)
+
+`apps/ra2ne-runtime/src/installation.rs` now resolves and mounts the archives in
+gamemd.exe's own registration order (REA evidence in REA_SETUP.md): language
+packs, `EXPANDMD99..00`, `RA2MD`/`RA2` with their nested `CACHE`/`LOCAL`
+packs, audio, `ECACHE*`/`ELOCAL*`, the graphics packs (`CONQ*`, `GENER*`,
+`ISOGEN*`, `CONQUER`, `CAMEO*`, map packs, `MULTI*`, `THEME*`), the scenario
+`LOAD`/`NEUTRAL` packs, and finally the selected theater
+(`<base>MD.MIX` for snow only, `<base>.MIX`, `<code>.MIX`, `<iso>MD.MIX`,
+`<iso>.MIX`). Names resolve in registered archives before the disk, so loose
+`.mix` files stay invisible unless the registration list names them and no
+archive holds that name, and a loose `rulesmd.ini` is ignored while an archived
+copy exists. Loose non-archive game-directory files mount as the lowest layer.
+
+Re-run with the supplied package (`RA2NE_GAME_DIR=Ra2Game412`,
+`RA2NE_MAP_DIR=…/maps-extracted`, `RA2NE_EDITION=yr`,
+`RA2NE_MAP_ENCODING=windows1252`), 371 maps, 374.1 s. Per-theater map counts:
+DESERT 17, LUNAR 1, NEWURBAN 26, SNOW 102, TEMPERATE 169, URBAN 56 — each
+theater loaded its own theater group (snow mounts five archives including
+`SNOWMD.MIX`, the others four):
+
+```
+map_graphics_maps=371; terrain_images=240327; overlay_cells=271966;
+overlay_images=15687; empty_overlay_cells=10204; outside_overlay_cells=1;
+tolerated_no_image_refs=663
+map_scenery_cells=165818; images=7261; outside=0; out_of_range=0; failing_maps=0
+map_infantry_actors=4011; unresolved=0; failing_maps=0
+```
+
+The totals are identical to the pre-change frozen table, so the broader mount
+set (audio, load, neutral, language, map and multi packs — about 590 MB per
+theater) changed no resolution outcome. Budgets are 1 GiB reads, 1 GiB resident
+mounts and 64 MiB for the loose fallback layer.

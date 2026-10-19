@@ -149,6 +149,88 @@ node "$REA" doctor --provider ghidra                             # 健康检查
 - 结论已落入实现与验收：全量 371 张地图严格检查 0 未解析引用，见
   `REAL_RESOURCE_VALIDATION.md`（2026-10-19 节）。
 
+### 2026-10-19（P1 挂载搜索顺序：注册表、优先级方向、松散文件与规则文件）
+
+- **注册序列**（先注册 = 优先级高；`FUN_005b4430` 从链表头（`DAT_00abefe0`
+  哨兵）开始遍历，首个命中即返回；每次注册由 `FUN_005b3c20` 构造
+  MixFileClass 后追加到 `DAT_00884d94`/count `DAT_00884da0`）：
+  1. `FUN_006bb9a0`（= WinMain，CRT 启动 `0x7cd80f` 以
+     `(hInstance, hPrevInstance, lpCmdLine, nCmdShow)` 调用）在早期注册
+     `LANGMD.MIX`（0x6bd7ef）与 `LANGUAGE.MIX`（0x6bd81f）。
+  2. `FUN_0052ba60`（游戏初始化）依次调用：
+     - `FUN_005301a0`（0x52bb64）：`EXPANDMD%02d.MIX` 循环 i=99→00、
+       再 `RA2MD.MIX`、`RA2.MIX`、`CACHEMD.MIX`、`CACHE.MIX`、
+       `LOCALMD.MIX`、`LOCAL.MIX`（每个先做可用性检查，缺失则跳过；
+       RA2/RA2MD 缺失为致命）；
+     - `FUN_00406b10`（0x52bbc7）：`AUDIOMD.MIX`、`AUDIO.MIX`；
+     - `FUN_00530000`（0x52c307）：`ECACHE*.MIX` 然后 `ELOCAL*.MIX`
+       （FindFirstFileA 通配枚举）；
+     - `FUN_00530460`（0x52c59c）：`CONQMD.MIX`、`GENERMD.MIX`、
+       `GENERIC.MIX`、`ISOGENMD.MIX`、`ISOGEN.MIX`、`CONQUER.MIX`、
+       `CAMEOMD.MIX`、`CAMEO.MIX`、`MAPSMD*.MIX`/`MAPS*.MIX`（含
+       `MAPSMD%02d.MIX`/`MAPS%02d.MIX` 循环）、`MULTIMD.MIX`、
+       `MULTI.MIX`、`THEMEMD.MIX`、`THEME.MIX`、影片包
+       （`MOVMD%02d.MIX`/`MOVIES%02d.MIX`，或 `MIXFILES\MOV*.MIX`）。
+  3. 场景阶段（晚于固定表）：`FUN_00552cc0`（0x6847d5）
+     `LOADMD.MIX`/`LOAD.MIX`（实测在包内：13.1 MB / 25.5 MB）；
+     `FUN_00534e50` `NTRLMD.MIX`/`NEUTRAL.MIX`（12.9 MB / 45.6 MB）；
+     `FUN_00534fa0`（按所选阵营）`SIDEC%02dMD.MIX`、`SIDEC%02d.MIX`、
+     `SIDENC%02d.MIX`（对应盘符检查，缺失时打印
+     "This was not disk one or two"）；`FUN_007afb90`（WDT 模式）
+     `WDT.MIX`/`WDTVOX.MIX`。
+     实测 `AUDIO`/`AUDIOMD`（37.5 MB / 74.5 MB）与 `LOAD`（25.5 MB /
+     13.1 MB）、`NEUTRAL`（45.6 MB / 12.9 MB）都在 `language(.md).mix` /
+     `ra2(.md).mix` 内部，属于必须挂载的常规包；同理 `CAMEO`/`CAMEOMD`
+     在 `language.mix`/`langmd.mix` 内（先注册者命中）。
+  4. **剧院包** `FUN_005349c0`（0x5349c0，切换剧院时先析构上一组再注册）：
+     `<base>MD.MIX`（源码里只有 `theater_index == 1`（= 雪地）才注册，
+     实际数据也只有 `SNOWMD.MIX`）、`<base>.MIX`、三位码 `<code>.MIX`、
+     `<iso>MD.MIX`、`<iso>.MIX`。名称来自 0x7e1b78 起的剧院表（步长
+     0x70，字段：显示名 / `Name:*` 标签 / `<base>` / `<iso>` / `<iso>MD>` /
+     三位码 / 弹珠模式码），例如雪地 = `SNOWMD.MIX`、`SNOW.MIX`、
+     `SNO.MIX`、`ISOSNOMD.MIX`、`ISOSNOW.MIX`。此后还会用
+     `%s.PAL`/`UNIT%s.PAL` 直接按名字取调色板（`UNITTEM.PAL` 等只在
+     `cache.mix` 中，`isotem.pal` 亦然）。
+- **优先级方向（先注册者优先）三重证据**：(a) 1.001 补丁必须生效：
+  `expandmd01.mix` 的 `rulesmd.ini`（743,215 B）与
+  `ra2md.mix→localmd.mix` 的 1.000 版本（742,958 B）确有 159 行内容差异
+  （`ImmuneToPsionicWeapons=yes ;gs Patch`、英雄改名/语音回退等），若后
+  注册者优先则补丁规则会被 1.000 副本覆盖；(b) 固定表内所有 md 变体都排在
+  基础包之前（`CAMEOMD` 先于 `CAMEO`、`CONQMD` 先于 `CONQUER`、
+  `GENERMD` 先于 `GENERIC`…），只有“先注册者优先”才自洽；(c)
+  `EXPANDMD%02d` 按 99→00 递减枚举并追加注册 ⇒ 99 号优先级最高，与社区
+  “expandmd 数字大者覆盖小者”一致。**据此 RA2NE 按相反顺序挂载**
+  （VFS 后挂载者优先）。
+- **名称解析顺序**（`FUN_00473c50` = `CCFileClass::Open`）：已打开标记
+  （+0x1a）→ vtbl+0x18 缓存检查 → `FUN_005b4430` 遍历已注册归档 →
+  `FUN_00431f10`（`CreateFileA`，磁盘）。即**归档优先于磁盘**：游戏目录
+  里的松散 `LOCALMD.MIX` 会被 `ra2md.mix` 内的同名副本遮蔽；注册表里没有
+  的 `.mix` 即使放在游戏目录也永远不会被注册（引擎只按名单/通配注册）。
+- **规则文件**（`FUN_0052cd70`）：`FindFirstFileA("RULEMD*.INI")` 枚举磁盘；
+  命中文件与 `RULESMD.INI` 逐名比较（`FUN_007c8d20`），相等者作为主规则集
+  插到列表头部，其余按枚举顺序追加为**合并层**；目录里没有主文件时回退按
+  名字打开 `RULESMD.INI`（走归档优先）。注意按 Windows 通配语义
+  `RULEMD*.INI` 匹配不到 `RULESMD.INI`，故**松散 rulesmd.ini 不会覆盖归档
+  副本**——社区实测一致（CnCNet 论坛 “rulesmd.ini placed in the game folder
+  is simply ignored”；ModEnc：YR 1.001 规则在 `expandmd01.mix`）。RA2NE
+  采用同样的“归档优先、松散兜底”模型；`RULEMD*.INI` 附加合并层尚未实现
+  （缺口记录在 `FORMAT_NOTES.md`）。
+- **实测挂载清单**（本机 1.001 完整包，TEMPERATE/YR，约 590 MB）：
+  language.mix 52.9 MB + langmd.mix 84.6 MB，其内 audio 37.5 / audiomd 74.5、
+  cameo 0.6 / cameomd 0.2 MB；expandmd01 4.8 MB；maps01/02 + mapsmd03
+  11.4 MB；multi + multimd 57.1 MB；ra2.mix 内 local 34.8 / cache 0.2 /
+  conquer 16.3 / generic 15.8 / isogen 12.0 / isotemp 29.2 / temperat 2.7 /
+  tem 0.01 / load 25.5 / neutral 45.6 MB；ra2md.mix 内 localmd 4.8 /
+  cachemd 0.01 / conqmd 6.2 / genermd 12.6 / isogenmd 6.6 / isotemmd 5.1 /
+  loadmd 13.1 / ntrlmd 12.9 MB；松散兜底层 26.0 MB。整包读取约 725 MB
+  （RA2/RA2MD 容器只用于解析名字、不再重复挂载）。
+  6 个剧院组中雪地组 5 个包（含 `SNOWMD.MIX`）其余各 4 个，
+  `SNOWMD.MIX`/`ISOTEMMD.MIX` 等 md 剧院包实测均存在 ✓。
+  各剧院包按“<base>MD（仅雪地）→ <base> → <code> → <iso>MD → <iso>”
+  注册，且实测 `temperat.mix`/`isotemp.mix`/`snow.mix`/`isosnow.mix`/
+  `isodes.mix`/`isolun.mix`/`urbann.mix`/`isoubn.mix` 等与数据一致。
+
+
 ## 下一步分析目标
 
 见 `docs/TODO.md` 的 "REA-assisted investigation backlog" 一节，包括：

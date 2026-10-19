@@ -53,6 +53,37 @@ imports reject symlinks and unsupported file types, have a caller byte budget,
 and publish only after successful validation of the whole mount. This adapter
 expects stable user-provided directories, not concurrently mutated hostile paths.
 
+## Stock installation mount order
+
+`apps/ra2ne-runtime/src/installation.rs` reproduces gamemd.exe's archive
+registration order and name lookup (analysis record and function addresses in
+REA_SETUP.md):
+
+- Registration order, highest priority first: `LANGMD`/`LANGUAGE`;
+  `EXPANDMD99..00`, `RA2MD`, `RA2`, `CACHEMD`, `CACHE`, `LOCALMD`, `LOCAL`;
+  `AUDIOMD`, `AUDIO`; `ECACHE*`/`ELOCAL*` wildcards; `CONQMD`, `GENERMD`,
+  `GENERIC`, `ISOGENMD`, `ISOGEN`, `CONQUER`, `CAMEOMD`, `CAMEO`, `MAPS*`,
+  `MULTIMD`, `MULTI`, `THEMEMD`, `THEME`, movie packs (skipped); then the
+  scenario packs `LOAD`, `NEUTRAL`; and last the selected theater
+  (`<base>MD.MIX` for snow only, `<base>.MIX`, `<code>.MIX`, `<iso>MD.MIX`,
+  `<iso>.MIX`). The first registered archive wins, so RA2NE mounts in reverse:
+  the VFS prefers the most recent mount.
+- A registration name resolves in the already registered archives before the
+  disk (`CCFileClass::Open`), so a loose `.mix` file is only picked up when the
+  registration list names it and no archive already holds that name.
+- Loose non-archive game-directory files mount as the lowest layer, because the
+  engine only reaches the disk when no archive holds the name. The budget is
+  64 MiB; larger files are skipped with a diagnostic. Subdirectories are not
+  part of this fallback mount.
+- Budgets: 1 GiB total disk reads and 1 GiB resident mounts (the shipped YR
+  package mounts about 570 MB per theater). `RA2.MIX`/`RA2MD.MIX` are opened
+  for name resolution but not kept mounted: their roots only carry the nested
+  archives that are mounted individually, so a mod that adds root-level entries
+  to them would not be seen.
+- Documented gaps: movie packs; the per-side `SIDEC%02d[Md].MIX` packs (no side
+  selection yet); the WDT packs; and the disk `RULEMD*.INI` merge layers, so
+  only `rules(md).ini` itself is read.
+
 ## RA2/YR map packs and initial rules schema
 
 References:

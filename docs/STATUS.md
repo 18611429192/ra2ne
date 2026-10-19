@@ -662,3 +662,18 @@ one section (last value wins, matching the original INI merge) and 2 entries
 outside any section (`multi/tn01t2.map` writes `CampaignMoneyDeltaEasy/Hard`,
 which the original reads from RULES.INI `[General]` with a section-scoped
 lookup, so a bare map entry cannot override them).
+
+Same batch: the stock/mod mount search order is now the engine's own. REA on
+`gamemd.exe` recovered the full registration sequence (LANGMD/LANGUAGE;
+EXPANDMD99..00, RA2MD, RA2, CACHEMD, CACHE, LOCALMD, LOCAL; AUDIOMD, AUDIO;
+ECACHE*/ELOCAL*; CONQMD…THEME; scenario LOAD/NEUTRAL packs; then the selected
+theater with snow-only `<base>MD.MIX`), first-registered-wins (the 1.001
+`expandmd01.mix` rulesmd.ini has to beat `localmd.mix`), and the lookup rule
+`CCFileClass::Open` uses (already-registered archives before the disk, so loose
+`.mix` files are invisible unless the list names them and a loose
+`rulesmd.ini` is ignored while an archived copy exists). `installation.rs`
+resolves and mounts exactly that list in reverse (the VFS prefers the latest
+mount), keeps a 64 MiB loose game-directory fallback at the bottom, and
+documents the remaining gaps (movie, per-side and WDT packs; the disk
+`RULEMD*.INI` merge layers). Full 371-map acceptance re-run against the same
+frozen no-image table: identical totals, 0 failing maps.

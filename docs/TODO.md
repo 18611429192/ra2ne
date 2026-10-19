@@ -58,9 +58,23 @@ ordinary INI mods. Synthetic tests alone cannot satisfy this target.
 - [ ] Animated/damaged/random terrain variants; mining/growth overlays;
   per-pixel depth order and lighting.
 - [ ] Audio (none implemented).
-- [ ] Loose-file overrides and complete stock/mod mount search order
-  (current stock terrain profile is deliberately narrow; XCC name databases
-  optional; automatic game-directory mount policy pending).
+- [x] **Loose-file overrides and complete stock/mod mount search order** —
+  resolved 2026-10-19. REA on `gamemd.exe` gives the full registration order
+  (WinMain `FUN_006bb9a0`: LANGMD/LANGUAGE; `FUN_005301a0`: EXPANDMD99..00,
+  RA2MD, RA2, CACHEMD, CACHE, LOCALMD, LOCAL; `FUN_00406b10`: AUDIOMD, AUDIO;
+  `FUN_00530000`: ECACHE*/ELOCAL*; `FUN_00530460`: CONQMD…THEME; scenario
+  packs LOAD/NEUTRAL; `FUN_005349c0`: the selected theater, snow-only
+  `<base>MD.MIX` first) and the lookup rule (`FUN_00473c50` = archives before
+  disk, so a loose `.mix` is only picked up when the list names it and no
+  archive holds that name; a loose `rulesmd.ini` is ignored while an archived
+  copy exists). First registered wins — the 1.001 `expandmd01.mix`
+  `rulesmd.ini` must beat `localmd.mix`, every md variant precedes its base,
+  and the 99→00 expansion loop matches "higher number wins". `installation.rs`
+  now resolves and mounts that exact list (reverse order for the VFS), adds a
+  64 MiB loose game-directory fallback layer at the bottom and documents the
+  gaps (movie packs, per-side packs, WDT packs, `RULEMD*.INI` merge layers).
+  Full 371-map acceptance re-run: identical totals, 0 failing maps. See
+  `REA_SETUP.md` (2026-10-19 mount order) and `FORMAT_NOTES.md` (mount order).
 
 ## P2 — Original gameplay semantics
 

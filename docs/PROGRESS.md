@@ -73,3 +73,16 @@ freezes those tolerated no-image outcomes in a reviewed expectation table and
 fails on anything unexpected. This closes the documented P0 acceptance gaps for
 these maps; original gameplay, animation and the 1.0 end-to-end target are still
 pending, so the overall estimate remains approximately 25%.
+
+The runtime now loads the stock package the way gamemd.exe does. REA recovered
+the full archive registration order (language packs first, then EXPANDMD99..00
+down to the map/multi/theme packs, the scenario LOAD/NEUTRAL packs, and the
+selected theater group last), the first-registered-wins rule (the 1.001
+expandmd01.mix rulesmd.ini must beat the localmd.mix copy) and the
+archives-before-disk lookup, so loose `.mix` files only matter when the
+registration list names them and a loose `rulesmd.ini` is ignored while an
+archived copy exists. Loose game-directory files remain the lowest layer, and
+the gaps (movie/per-side/WDT packs, disk `RULEMD*.INI` merge layers) are
+documented instead of guessed at. The 371-map acceptance re-run produced
+byte-identical totals with 0 failing maps, confirming the wider mount set
+changes no resolution outcome.
