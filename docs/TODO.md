@@ -22,6 +22,9 @@ ordinary INI mods. Synthetic tests alone cannot satisfy this target.
   `apps/ra2ne-runtime/tests/data/map_no_image_expected.tsv` (663 entries, all
   on these 11 maps) and fails on anything unexpected. Full run: **371/371 maps
   pass**, zero unresolved references. No clamping or substitution.
+  - [x] Visual record (2026-10-19): 1920x1080 captures of the six-theater
+        samples plus unit close-ups through the native viewer; see
+        REAL_RESOURCE_VALIDATION.md (six-theater visual capture record).
   - [x] Missing `Cliff12.sno` subtile 2 — maps01/9103f015; maps02/9103f015
         (`terrain-missing`; the same maps also hold tile IDs 989–1060 beyond
         the catalog and empty blocked subtiles, all frozen)

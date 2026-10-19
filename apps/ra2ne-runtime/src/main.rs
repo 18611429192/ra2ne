@@ -32,6 +32,8 @@ struct Options {
     encoding: Option<TextEncoding>,
     smoke_frames: Option<u64>,
     screenshot: Option<String>,
+    view: Option<(i32, i32, f32)>,
+    window: Option<(u32, u32)>,
     headless_ticks: Option<u64>,
     autoplay: bool,
     battle: bool,
@@ -89,6 +91,10 @@ impl Options {
                     Some(v.parse().map_err(|_| "invalid headless tick count")?);
             } else if let Some(v) = arg.strip_prefix("--screenshot=") {
                 options.screenshot = Some(v.into());
+            } else if let Some(v) = arg.strip_prefix("--view=") {
+                options.view = Some(parse_view(v)?);
+            } else if let Some(v) = arg.strip_prefix("--window=") {
+                options.window = Some(parse_window(v)?);
             } else {
                 return Err(format!("unknown option: {arg}"));
             }
@@ -164,6 +170,33 @@ impl Options {
         }
         Ok(options)
     }
+}
+/// Acceptance-capture camera: cell coordinates and an optional zoom in the
+/// interactive 0.15..=2.5 range.
+fn parse_view(value: &str) -> Result<(i32, i32, f32), String> {
+    let parts = value.split(',').collect::<Vec<_>>();
+    if !(2..=3).contains(&parts.len()) {
+        return Err("view expects CX,CY[,ZOOM]".into());
+    }
+    let x = parts[0].parse::<i32>().map_err(|_| "invalid view cell x")?;
+    let y = parts[1].parse::<i32>().map_err(|_| "invalid view cell y")?;
+    let zoom = match parts.get(2) {
+        Some(zoom) => zoom.parse::<f32>().map_err(|_| "invalid view zoom")?,
+        None => 0.8,
+    };
+    if !(0.15..=2.5).contains(&zoom) {
+        return Err("view zoom outside 0.15..=2.5".into());
+    }
+    Ok((x, y, zoom))
+}
+fn parse_window(value: &str) -> Result<(u32, u32), String> {
+    let (width, height) = value.split_once('x').ok_or("window expects WxH")?;
+    let width = width.parse::<u32>().map_err(|_| "invalid window width")?;
+    let height = height.parse::<u32>().map_err(|_| "invalid window height")?;
+    if !(320..=3840).contains(&width) || !(240..=2160).contains(&height) {
+        return Err("window size outside 320x240..=3840x2160".into());
+    }
+    Ok((width, height))
 }
 struct Scene {
     world: Simulation,
@@ -487,11 +520,12 @@ fn diamond(p: macroquad::math::Vec2, width: f32, height: f32, color: Color) {
     draw_triangle(top, right, bottom, color);
     draw_triangle(top, bottom, left, color);
 }
-fn conf() -> Conf {
+fn conf(options: &Options) -> Conf {
+    let (window_width, window_height) = options.window.unwrap_or((1280, 800));
     Conf {
         window_title: "RA2NE / Engine Preview".into(),
-        window_width: 1280,
-        window_height: 800,
+        window_width: window_width as i32,
+        window_height: window_height as i32,
         high_dpi: true,
         sample_count: 1,
         ..Default::default()
@@ -555,7 +589,7 @@ fn main() {
                     scene.world.state_hash()
                 );
             } else {
-                macroquad::Window::from_config(conf(), run(options, scene));
+                macroquad::Window::from_config(conf(&options), run(options, scene));
             }
         }
     }
@@ -568,6 +602,13 @@ async fn run(options: Options, mut scene: Scene) {
         ),
         zoom: 0.8,
     };
+    if let Some((cell_x, cell_y, zoom)) = options.view {
+        view.center = vec2(
+            (cell_x - cell_y) as f32 * 30.0,
+            (cell_x + cell_y) as f32 * 15.0,
+        );
+        view.zoom = zoom;
+    }
     let terrain_textures = scene
         .terrain
         .as_ref()
@@ -1170,5 +1211,34 @@ fn draw_hud(
             15.0,
             Color::from_rgba(172, 184, 165, 255),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_view, parse_window};
+    #[test]
+    fn view_option_parses_and_bounds() {
+        assert_eq!(parse_view("10,20").unwrap(), (10, 20, 0.8));
+        assert_eq!(parse_view("-4,7,2.5").unwrap(), (-4, 7, 2.5));
+        assert_eq!(parse_view("1,2,0.15").unwrap(), (1, 2, 0.15));
+        assert!(parse_view("10").is_err());
+        assert!(parse_view("10,20,30,40").is_err());
+        assert!(parse_view("10,20,0").is_err());
+        assert!(parse_view("10,20,9").is_err());
+        assert!(parse_view("10,20,nan").is_err());
+        assert!(parse_view("x,20").is_err());
+        assert!(parse_view("10,y").is_err());
+    }
+    #[test]
+    fn window_option_parses_and_bounds() {
+        assert_eq!(parse_window("1920x1080").unwrap(), (1920, 1080));
+        assert_eq!(parse_window("320x240").unwrap(), (320, 240));
+        assert_eq!(parse_window("3840x2160").unwrap(), (3840, 2160));
+        assert!(parse_window("100x100").is_err());
+        assert!(parse_window("4000x1080").is_err());
+        assert!(parse_window("1920x100").is_err());
+        assert!(parse_window("1920").is_err());
+        assert!(parse_window("axb").is_err());
     }
 }

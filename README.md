@@ -221,9 +221,12 @@ vehicles/aircraft with VXL graphics and buildings are not rendered by this path.
 The screenshots run RA2NE's native Rust/Linux executable against original game
 assets, not the Windows game's EXE or Wine. A virtual X server supplies the test
 window and the renderer exports a framebuffer screenshot after the requested
-frames. Reading original resources does not imply that original gameplay is
-implemented. Native Windows builds and full cross-platform acceptance remain to
-be verified.
+frames. Acceptance captures choose their resolution with `--window=WxH`
+(320x240 to 3840x2160) and frame the camera with `--view=CX,CY[,ZOOM]` (cell
+centre; the zoom shares the interactive 0.15-2.5 range), so unit close-ups and
+reproducible viewpoints are possible. Reading original resources does not imply
+that original gameplay is implemented. Native Windows builds and full
+cross-platform acceptance remain to be verified.
 
 VXL/HVA model inspection is now available; this is resource decoding, not yet
 vehicle rendering in the window:

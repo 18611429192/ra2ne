@@ -326,3 +326,29 @@ The totals are identical to the pre-change frozen table, so the broader mount
 set (audio, load, neutral, language, map and multi packs — about 590 MB per
 theater) changed no resolution outcome. Budgets are 1 GiB reads, 1 GiB resident
 mounts and 64 MiB for the loose fallback layer.
+
+## Six-theater visual capture record (2026-10-19)
+
+The six sample maps above were also captured through the native window renderer
+under Xvfb (llvmpipe software rendering) using the acceptance-capture options:
+
+```
+target/release/ra2ne-runtime --map=Ra2Game412/maps-extracted/<dir>/<id>.map \
+  --game-dir=Ra2Game412 --edition=yr --smoke-frames=30 --window=1920x1080 \
+  [--view=CX,CY,ZOOM] --screenshot=/tmp/opencode/showcase/shots/<name>.png
+```
+
+Inspected 1920x1080 framebuffers: TEMPERATE `b6bdb430` flower fields, cliffs
+and palms (no placed units); SNOW `0629413d` frozen river, bridge and cliffs
+with 59 structure placeholders; URBAN `179782bb` streets, ruined blocks, docks,
+139 infantry and 86 vehicles including Rhino/Apocalypse columns, Grizzly
+detail and Aegis cruisers on the water; DESERT `03a45e74` dunes, oasis palms,
+tire tracks, nine camels and two LTNKs; NEWURBAN `19a211e3` city blocks, canal,
+civilians and 38 placed vehicle records (parked civilian cars); LUNAR
+`8ba1de85` craters, Yuri walls, lunar infantry (LUNR), LTNK/YTNK tanks and
+MIND/DISK records. Unsupported SHP vehicles and all buildings keep their
+placeholders; state hashes match earlier smoke runs for identical options.
+
+The captures, a 68 s 1080p showcase video and a six-theater poster were
+assembled outside the repository (ffmpeg) under /tmp/opencode/showcase and are
+not committed because they contain rendered original assets.

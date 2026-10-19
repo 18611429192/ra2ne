@@ -677,3 +677,23 @@ mount), keeps a 64 MiB loose game-directory fallback at the bottom, and
 documents the remaining gaps (movie, per-side and WDT packs; the disk
 `RULEMD*.INI` merge layers). Full 371-map acceptance re-run against the same
 frozen no-image table: identical totals, 0 failing maps.
+
+## 2026-10-19: acceptance-capture options and six-theater visual record
+
+The viewer now accepts `--window=WxH` (320x240 to 3840x2160, default 1280x800)
+and `--view=CX,CY[,ZOOM]` (initial camera cell centre; zoom shares the
+interactive 0.15-2.5 range), so acceptance captures are reproducible. Both
+parsers carry focused unit tests (`view_option_parses_and_bounds`,
+`window_option_parses_and_bounds`), and the options change no simulation state
+(smoke hashes are unchanged).
+
+Visual record (not committed: it renders original assets): 1920x1080 captures
+of the six-theater sample maps plus unit close-ups were rendered with the
+release build under Xvfb/llvmpipe and assembled into a 68 s showcase video and
+a six-theater poster under /tmp/opencode/showcase. Inspected: terrain, static
+overlays, scenery, placed infantry Ready poses and unlit VXL vehicles all draw
+on the real maps; unsupported SHP vehicles and buildings keep their
+placeholders. Capture commands are recorded in REAL_RESOURCE_VALIDATION.md.
+
+Verification: 129 workspace tests pass, 3 ignored original-resource acceptance
+tests; clippy with denied warnings, formatting and the release build pass.
