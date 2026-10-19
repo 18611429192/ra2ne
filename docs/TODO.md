@@ -14,17 +14,34 @@ ordinary INI mods. Synthetic tests alone cannot satisfy this target.
 
 ## P0 — Close documented acceptance gaps
 
-- [ ] **11 whole-map graphics failures** (strict private check, 360/371 pass).
-  Investigate original runtime behavior for each; do not clamp or substitute.
-  - [ ] Missing `Cliff12.sno` subtile 2 — maps01/9103f015; maps02/9103f015
-  - [ ] Missing `Cliff13.sno` subtile 1 — maps02/439fea47
-  - [ ] Missing `Cliff26.urb` subtile 1 — maps02/b7ce3f39
-  - [ ] Missing `hyte01.tem` resource — multi/1d555268; multimd/b00a1790
-  - [ ] `LOBRDB01.sno` frame references 6, 9, 10, 12 (30 cells) — maps02/1d3dc118
-  - [ ] `WCRATE.tem` frame reference 10 — multi/10d1801a; multimd/59b25b1a
-  - [ ] `CRATE.tem` frame reference 255 — multi/c1180b29; multimd/2b5e99be
-- [ ] Map parsing still reports 3,050 diagnostics (pending triggers etc.).
-  Classify and either implement or keep explicitly documented.
+- [x] **11 whole-map graphics failures** — resolved 2026-10-19. REA on
+  `gamemd.exe` shows the original draws nothing at all for every previously
+  failing reference: missing TMP files, tile IDs beyond the theater catalog,
+  empty (NULL) tile blocks and frame indexes past the SHP frame table. The
+  strict check no longer treats those as failures; it freezes them in
+  `apps/ra2ne-runtime/tests/data/map_no_image_expected.tsv` (663 entries, all
+  on these 11 maps) and fails on anything unexpected. Full run: **371/371 maps
+  pass**, zero unresolved references. No clamping or substitution.
+  - [x] Missing `Cliff12.sno` subtile 2 — maps01/9103f015; maps02/9103f015
+        (`terrain-missing`; the same maps also hold tile IDs 989–1060 beyond
+        the catalog and empty blocked subtiles, all frozen)
+  - [x] Missing `Cliff13.sno` subtile 1 — maps02/439fea47 (`terrain-missing`)
+  - [x] Missing `Cliff26.urb` subtile 1 — maps02/b7ce3f39 (`terrain-missing`)
+  - [x] Missing `hyte01.tem` resource — multi/1d555268; multimd/b00a1790
+        (`terrain-missing`)
+  - [x] `LOBRDB01.sno` frames 6, 9, 10, 12 — maps02/1d3dc118
+        (`overlay-frame`; lower stored frames resolve)
+  - [x] `WCRATE` frame 10 — multi/10d1801a; multimd/59b25b1a (`overlay-frame`)
+  - [x] `CRATE` frame 255 — multi/c1180b29; multimd/2b5e99be (`overlay-frame`)
+- [x] Map parsing diagnostics classified (2026-10-19): 3,050 total over 371 maps
+  = 3,001 informational "N entries preserved; runtime semantics pending" notes
+  (15 map sections kept available through the map INI), 44 off-grid waypoints
+  (preserved, excluded from usable coordinates), 3 duplicate keys inside a
+  section (last value wins, matching the original) and 2 entries outside any
+  section (unreachable for section-scoped lookups; they belong to RULES.INI
+  `[General]`). Reproduce with `cargo test -p ra2ne-runtime
+  survey_map_parse_diagnostics -- --ignored --nocapture`. Trigger/AI/house
+  simulation and editor-only Lighting/PreviewPack consumption remain pending.
 
 ## P1 — Finish original-resource rendering
 
@@ -97,8 +114,10 @@ workflow. Prioritized list:
   color numbers.
 - [ ] **Terrain passability**: which tile/overlay flags make cells walkable;
   clear-cell and bridge entry rules.
-- [ ] **The 11 P0 resource failures**: how the original resolves subtile/frame
-  references and what it does for missing resources (explains acceptance gaps).
+- [x] **The 11 P0 resource failures**: answered 2026-10-19 (see the P0 entry
+  and REA_SETUP.md citations FUN_005fd2e0, FUN_005fe250, FUN_0047f6a0,
+  FUN_00545150, FUN_005301a0). Known remaining fidelity gap: ore/veins and
+  rubble overlay frame selection still uses the stored data byte in RA2NE.
 - [ ] **Infantry animation timing**: Walk/Action frame rates from art/sequence
   data usage.
 - [ ] **Attachment calibration**: turret/barrel offsets and facing tables.

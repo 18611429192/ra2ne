@@ -121,12 +121,39 @@ node "$REA" doctor --provider ghidra                             # 健康检查
 - **快照**：`Ra2Game412/analysis/gamemd.analysis.json`（131KB，缓存了
   已执行查询：总览/字符串搜索/xrefs/函数上下文/伪代码）
 
+### 2026-10-19（P0 地图资源失败：引擎行为确认）
+
+- **地图 overlay 装载器** `FUN_005fd2e0`（0x5fd2e0–0x5fd69a）：按 512×512
+  逐格读 OverlayPack 解压流；字节 `0xff` 直接跳过（空格），其余
+  `type = DAT_00a83d84[byte]`（直接索引，无边界检查），通过检查后调用
+  `FUN_005fc380(type, cell, -1)` 创建 overlay 对象。id 0x18/0x19/0xed/0xee
+  例外地恢复 cell+0x11e（数据字节）。OverlayDataPack 循环只写
+  cell+0x11e 数据字节。对照：汇编 0x5fd41a–0x5fd433（`CMP EAX,-0x1` 跳过）。
+- **类型数组编号** `FUN_005fe250`（0x5fe250–0x5fe3b3）：构造时
+  `array[count++] = this`，随后扫描数组把**自身下标**写入 +0x294（id）。
+  `FUN_005fec70`（0x5fec70）在注册之前按名称查找已有类型并直接返回
+  ⇒ 重名条目复用旧槽位、不新增编号。INI 逐条注册路径在 `FUN_00668bf0`
+  （[OverlayTypes] 字符串 0x839da8，0x668ce9/0x668d0b/0x668d1a 三处引用）。
+  **更正**：数字 INI 键只是标签，字节 id = 首次出现顺序（此前"按键编号"
+  的推断错误）。交叉验证：`FUN_0047f6a0` 绘制时硬编码跳过 0xa7/0xb2，
+  按条目顺序它们正是 `USELESS`（键 170，规则注释 "gs Veinhole is 100K…"）
+  和 `VEINHOLEDUMMY`（键 181）——两个无图形占位类型；按键编号则会指向
+  TIB3_18/TROCK03 这两个有图形的类型，明显不合理。
+- **theater INI**：`gamemd.exe` 只构造 `"%sMD.INI"`（`FUN_00545150`，格式串
+  0x8295e8；`RULESMD.INI` 0x826260 / `ARTMD.INI` 0x826254），没有 base
+  层合并。
+- **expandmd 包**：`FUN_005301a0` 循环 i=99→0 构造 `EXPANDMD%02d.MIX`，
+  注册顺序先于 RA2MD.MIX/RA2.MIX ⇒ expand 覆盖主包、编号大者优先。
+- **overlay 绘制**（早前批次，`FUN_0047f6a0`）：帧号 = 数据字节；
+  `frame ≥ frame_count` 时不绘制；id 167/178 直接返回。
+- 结论已落入实现与验收：全量 371 张地图严格检查 0 未解析引用，见
+  `REAL_RESOURCE_VALIDATION.md`（2026-10-19 节）。
+
 ## 下一步分析目标
 
 见 `docs/TODO.md` 的 "REA-assisted investigation backlog" 一节，包括：
 单位移动速度→格/秒映射、ROF/建造时间的秒↔tick 换算、伤害取整语义、
-体素法线光照、房屋颜色曲线、地形可通行性规则、11 个地图失败资源引用的
-原始解析行为等。
+体素法线光照、房屋颜色曲线、地形可通行性规则等。
 
 ## 已知说明
 

@@ -1,7 +1,7 @@
 //! Original map overlay/scenery catalogues and SHP lookup. This is graphics metadata,
 //! not wall connectivity, ore growth, bridge navigation or gameplay.
 use crate::{rules::RuleSet, sprite::Shp, vfs::Vfs};
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Environment {
@@ -106,8 +106,12 @@ pub struct OverlayType {
 }
 #[derive(Debug)]
 pub struct OverlayCatalog {
-    /// Source order determines the byte ID; numeric INI keys are labels.
-    /// Invalid definitions keep an empty slot so subsequent IDs never shift.
+    /// The byte ID is the position in this list, not the numeric INI key:
+    /// FUN_005fe250 appends every new type and stores its own index as the
+    /// ID, and FUN_005fec70 hands back an existing type when a name repeats,
+    /// so duplicate labels and invalid definitions never shift later IDs.
+    /// Invalid definitions keep an empty slot, and FUN_0047f6a0 skips the
+    /// placeholder IDs 167 (USELESS) and 178 (VEINHOLEDUMMY) outright.
     pub types: Vec<Option<OverlayType>>,
     pub diagnostics: Vec<String>,
 }
@@ -152,7 +156,17 @@ impl OverlayCatalog {
         }
         let mut types = Vec::with_capacity(entries.len());
         let mut diagnostics = Vec::new();
-        for (id, entry) in entries.iter().enumerate() {
+        let mut names = BTreeSet::new();
+        for entry in entries {
+            // FUN_005fec70 returns the existing type when a name repeats, so a
+            // duplicate label never consumes another byte ID.
+            if !names.insert(entry.entry.value.to_ascii_lowercase()) {
+                diagnostics.push(format!(
+                    "{registry} entry ({}:{}): duplicate type {} reuses its ID",
+                    entry.source, entry.entry.line, entry.entry.value
+                ));
+                continue;
+            }
             let definition = (|| {
                 let type_id = &entry.entry.value;
                 if !safe_prefix(type_id) {
@@ -205,8 +219,10 @@ impl OverlayCatalog {
                 Err(error) => {
                     types.push(None);
                     diagnostics.push(format!(
-                        "{registry} entry {id} ({}:{}): {error}",
-                        entry.source, entry.entry.line
+                        "{registry} entry {} ({}:{}): {error}",
+                        types.len() - 1,
+                        entry.source,
+                        entry.entry.line
                     ));
                 }
             }
@@ -300,7 +316,7 @@ mod tests {
         rules
             .add_layer(
                 "map",
-                "[OverlayTypes]\n10=ORE\n99=BRIDGE1\n[ORE]\nTiberium=yes\n[BRIDGE1]\nImage=BRIDGE",
+                "[OverlayTypes]\n10=ORE\n99=BRIDGE1\n20=WALL\n[ORE]\nTiberium=yes\n[BRIDGE1]\nImage=BRIDGE",
             )
             .unwrap();
         let catalogue = OverlayCatalog::from_rules(&rules, &RuleSet::default()).unwrap();
@@ -313,7 +329,7 @@ mod tests {
             catalogue.types[3].as_ref().unwrap().geometry,
             Geometry::HighBridge
         );
-        assert_eq!(catalogue.diagnostics.len(), 1);
+        assert_eq!(catalogue.diagnostics.len(), 2);
         assert!(OverlayCatalog::from_rules(&RuleSet::default(), &RuleSet::default()).is_err());
     }
     #[test]

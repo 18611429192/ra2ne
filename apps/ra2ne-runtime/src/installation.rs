@@ -219,12 +219,47 @@ pub fn load(
             eprintln!("terrain mount: {source}");
         }
     }
+    if edition == Edition::Yr {
+        // FUN_005301a0 registers EXPANDMD%02d.MIX for 99..01 before the main
+        // archives, so expansion packs override them and higher numbers win.
+        // Mount ascending: the VFS prefers the most recent mount.
+        let mut expansion = paths
+            .keys()
+            .filter(|name| {
+                name.len() == 14
+                    && name.starts_with("expandmd")
+                    && name.as_bytes()[8..10].iter().all(u8::is_ascii_digit)
+                    && name.ends_with(".mix")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        expansion.sort();
+        for name in expansion {
+            let path = &paths[&name];
+            let bytes = super::read(
+                path.to_str().ok_or("installation path is not UTF-8")?,
+                INPUT_BUDGET - input_bytes,
+            )?;
+            input_bytes += bytes.len();
+            mounted_bytes += bytes.len();
+            if mounted_bytes > MOUNT_BUDGET {
+                return Err("installation terrain mount budget exceeded".into());
+            }
+            let source = format!("{root}/{name}");
+            files.mount_mix(&source, MixArchive::parse(bytes.into())?, FilenameHash::Ra2)?;
+            eprintln!("terrain mount: {source}");
+        }
+    }
     let mut ini = String::new();
     let mut ini_names = Vec::new();
-    if let Some(base) = profile.base_ini {
-        ini_names.push(base);
-    }
-    if edition == Edition::Yr {
+    if edition == Edition::Ra2 {
+        // ra2.exe reads the un-suffixed theater INI.
+        if let Some(base) = profile.base_ini {
+            ini_names.push(base);
+        }
+    } else {
+        // gamemd.exe builds "%sMD.INI" only (FUN_00545150); the md files
+        // already supersede the base lists, so the base is not merged.
         ini_names.push(profile.yr_ini);
     }
     for name in ini_names {
@@ -277,7 +312,7 @@ mod tests {
         bytes
     }
     #[test]
-    fn stock_directory_merges_yr_ini_and_overrides_base_resources() {
+    fn stock_directory_uses_md_theater_ini_and_overrides_base_resources() {
         struct Directory(PathBuf);
         impl Drop for Directory {
             fn drop(&mut self) {
@@ -298,7 +333,7 @@ mod tests {
                 "local.mix",
                 mix(vec![(
                     "temperat.ini",
-                    b"[TileSet0000]\nFileName=clear\nTilesInSet=1".to_vec(),
+                    b"[TileSet0000]\nFileName=clear\nTilesInSet=1\n[TileSet0001]\nFileName=slope\nTilesInSet=1".to_vec(),
                 )]),
             ),
             ("cache.mix", mix(vec![("isotem.pal", vec![1; 768])])),
@@ -309,7 +344,7 @@ mod tests {
                 "localmd.mix",
                 mix(vec![(
                     "temperatmd.ini",
-                    b"[TileSet0000]\nTilesInSet=2".to_vec(),
+                    b"[TileSet0000]\nFileName=clear\nTilesInSet=2".to_vec(),
                 )]),
             ),
             ("cachemd.mix", mix(vec![("isotem.pal", vec![3; 768])])),
@@ -324,7 +359,8 @@ mod tests {
         let path = root.0.to_str().unwrap();
         let (catalogue, palette, files) =
             load(path, Edition::Ra2, "TEMPERATE", TextEncoding::Utf8).unwrap();
-        assert_eq!(catalogue.tiles.len(), 1);
+        assert_eq!(catalogue.tiles.len(), 2);
+        assert_eq!(catalogue.tiles[1].filename, "slope01.tem");
         assert_eq!(palette.colors[0], [4; 3]);
         assert_eq!(
             catalogue
@@ -337,6 +373,7 @@ mod tests {
         );
         let (catalogue, palette, files) =
             load(path, Edition::Yr, "TEMPERATE", TextEncoding::Utf8).unwrap();
+        // The md INI alone builds the table: the base-only slope set is absent.
         assert_eq!(catalogue.tiles.len(), 2);
         assert_eq!(catalogue.tiles[1].filename, "clear02.tem");
         assert_eq!(palette.colors[0], [12; 3]);
@@ -357,6 +394,49 @@ mod tests {
                 .unwrap()
                 .pixels[2],
             10
+        );
+        std::fs::write(
+            root.0.join("EXPANDMD01.MIX"),
+            mix(vec![("clear01.tem", tile(11))]),
+        )
+        .unwrap();
+        let (catalogue, _, files) =
+            load(path, Edition::Yr, "TEMPERATE", TextEncoding::Utf8).unwrap();
+        assert_eq!(
+            catalogue
+                .load(0, &files)
+                .unwrap()
+                .diamond(0)
+                .unwrap()
+                .pixels[2],
+            11
+        );
+        std::fs::write(
+            root.0.join("expandmd02.mix"),
+            mix(vec![("clear01.tem", tile(12))]),
+        )
+        .unwrap();
+        let (catalogue, _, files) =
+            load(path, Edition::Yr, "TEMPERATE", TextEncoding::Utf8).unwrap();
+        assert_eq!(
+            catalogue
+                .load(0, &files)
+                .unwrap()
+                .diamond(0)
+                .unwrap()
+                .pixels[2],
+            12
+        );
+        let (catalogue, _, files) =
+            load(path, Edition::Ra2, "TEMPERATE", TextEncoding::Utf8).unwrap();
+        assert_eq!(
+            catalogue
+                .load(0, &files)
+                .unwrap()
+                .diamond(0)
+                .unwrap()
+                .pixels[2],
+            7
         );
         std::fs::write(root.0.join("ra2md.mix"), b"broken").unwrap();
         assert!(load(path, Edition::Yr, "TEMPERATE", TextEncoding::Utf8).is_err());

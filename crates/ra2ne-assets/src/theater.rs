@@ -9,10 +9,19 @@ pub struct TileFile {
     pub filename: String,
 }
 #[derive(Debug)]
-pub struct ResolvedTile {
-    pub tmp: Tmp,
-    pub filename: String,
-    pub source: String,
+pub enum ResolvedTile {
+    /// A theater TMP exists and decodes.
+    Loaded {
+        tmp: Tmp,
+        filename: String,
+        source: String,
+    },
+    /// The catalogue defines the tile but no file exists under any fallback
+    /// extension: the engine's GetBlocks returns NULL and draws nothing.
+    Missing,
+    /// The map references an index outside the catalogue; the engine reports
+    /// "Invalid tile at %d,%d" and draws nothing.
+    Outside,
 }
 #[derive(Debug)]
 pub struct Theater {
@@ -107,16 +116,22 @@ impl Theater {
     /// The on-disk 0xffff map marker (-1) resolves to clear tile zero.
     /// Other negative indices remain invalid.
     pub fn load(&self, index: i16, files: &Vfs) -> Result<Tmp, &'static str> {
-        Ok(self.resolve(index, files)?.tmp)
+        match self.resolve(index, files)? {
+            ResolvedTile::Loaded { tmp, .. } => Ok(tmp),
+            ResolvedTile::Missing => Err("theater TMP resource missing"),
+            ResolvedTile::Outside => Err("map tile index outside theater catalogue"),
+        }
     }
-    /// Original editor lookup uses .urb fallback for NewUrban, then .tem.
-    /// Report the resolved filename so callers also select its palette.
+    /// The tile loader appends the theater extension, then falls back to
+    /// `.urb` for NewUrban and finally to the generic `".TEM"`/`".URB"`
+    /// literals in the executable. Report the resolved filename so callers
+    /// also select its palette. A catalogue index without any file is not an
+    /// error: the original draws nothing for that cell.
     pub fn resolve(&self, index: i16, files: &Vfs) -> Result<ResolvedTile, &'static str> {
         let index = if index == -1 { 0 } else { index };
-        let tile = usize::try_from(index)
-            .ok()
-            .and_then(|i| self.tiles.get(i))
-            .ok_or("map tile index outside theater catalogue")?;
+        let Some(tile) = usize::try_from(index).ok().and_then(|i| self.tiles.get(i)) else {
+            return Ok(ResolvedTile::Outside);
+        };
         let (stem, extension) = tile
             .filename
             .rsplit_once('.')
@@ -125,26 +140,36 @@ impl Theater {
         if extension == "ubn" {
             extensions.push("urb");
         }
-        if extension != "tem" {
-            extensions.push("tem");
+        for fallback in ["tem", "urb"] {
+            if !extensions.contains(&fallback) {
+                extensions.push(fallback);
+            }
         }
         for extension in extensions {
             let filename = format!("{stem}.{extension}");
             if let Some(file) = files.get(&filename)? {
-                return Ok(ResolvedTile {
+                return Ok(ResolvedTile::Loaded {
                     tmp: Tmp::parse(Arc::from(file.bytes))?,
                     filename,
                     source: file.source.to_owned(),
                 });
             }
         }
-        Err("theater TMP resource missing")
+        Ok(ResolvedTile::Missing)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn loaded(resolved: ResolvedTile) -> (String, String) {
+        match resolved {
+            ResolvedTile::Loaded {
+                filename, source, ..
+            } => (filename, source),
+            other => panic!("expected a loaded tile, got {other:?}"),
+        }
+    }
     #[test]
     fn numeric_order_and_empty_sets_preserve_ids() {
         let theater = Theater::parse("[TileSet0002]\nFileName=slope\nTilesInSet=2\n[TileSet0000]\nFileName=clear\nTilesInSet=1\n[TileSet0001]\nTilesInSet=0", "TEM").unwrap();
@@ -188,14 +213,16 @@ mod tests {
         files
             .mount("temperate", vec![("clear01.tem".into(), bytes.clone())])
             .unwrap();
-        assert_eq!(theater.resolve(0, &files).unwrap().filename, "clear01.tem");
+        assert_eq!(
+            loaded(theater.resolve(0, &files).unwrap()),
+            ("clear01.tem".into(), "temperate".into())
+        );
         files
             .mount("urban", vec![("clear01.urb".into(), bytes)])
             .unwrap();
-        let resolved = theater.resolve(0, &files).unwrap();
         assert_eq!(
-            (resolved.filename.as_str(), resolved.source.as_str()),
-            ("clear01.urb", "urban")
+            loaded(theater.resolve(0, &files).unwrap()),
+            ("clear01.urb".into(), "urban".into())
         );
         files
             .mount(
@@ -223,6 +250,21 @@ mod tests {
             theater.load(0, &files).unwrap().diamond(0).unwrap()
         );
         assert!(theater.load(-2, &files).is_err());
+    }
+    #[test]
+    fn missing_files_and_out_of_range_ids_draw_nothing_without_erroring() {
+        let theater = Theater::parse("[TileSet0000]\nFileName=clear\nTilesInSet=1", "tem").unwrap();
+        let files = Vfs::default();
+        assert!(matches!(
+            theater.resolve(0, &files).unwrap(),
+            ResolvedTile::Missing
+        ));
+        for index in [1, -2] {
+            assert!(matches!(
+                theater.resolve(index, &files).unwrap(),
+                ResolvedTile::Outside
+            ));
+        }
     }
     #[test]
     fn rejects_shifted_ids_and_unsafe_names() {

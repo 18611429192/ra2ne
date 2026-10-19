@@ -21,13 +21,29 @@ pub struct Texture {
     pub texture: Texture2D,
     pub offset: (i32, i32),
 }
+/// Why a referenced overlay or scenery image is not drawn. The engine skips
+/// these cases on purpose; the strict acceptance check freezes them so only
+/// enumerable, engine-faithful outcomes are tolerated.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum NoImage {
+    /// The type's SHP has no such frame; the original draws nothing.
+    FrameOutOfRange,
+    /// FUN_0047f6a0 returns before drawing IDs 167/178, the stock
+    /// placeholder types USELESS and VEINHOLEDUMMY.
+    EngineSkip,
+    /// The decoded frame is fully transparent.
+    EmptyFrame,
+}
 #[derive(Debug, Default)]
 pub struct Statistics {
     pub cells: usize,
     pub images: usize,
     pub unresolved: usize,
     pub empty: usize,
+    pub out_of_range: usize,
+    pub skipped: usize,
     pub outside: usize,
+    pub no_image: BTreeSet<(u8, u8, NoImage)>,
 }
 impl Statistics {
     pub fn report(&self) -> String {
@@ -35,8 +51,15 @@ impl Statistics {
     }
     pub fn report_as(&self, label: &str) -> String {
         format!(
-            "{label} cells: {}; images: {}; unresolved: {}; empty: {}; outside terrain: {}",
-            self.cells, self.images, self.unresolved, self.empty, self.outside
+            "{label} cells: {}; images: {}; unresolved: {}; empty: {}; out of range: {}; skipped: {}; outside terrain: {}; tolerated no image: {}",
+            self.cells,
+            self.images,
+            self.unresolved,
+            self.empty,
+            self.out_of_range,
+            self.skipped,
+            self.outside,
+            self.no_image.len()
         )
     }
 }
@@ -107,6 +130,9 @@ impl Scene {
         let mut outside = 0;
         let mut references = BTreeMap::<u8, BTreeMap<u8, usize>>::new();
         let mut missing = 0;
+        let mut out_of_range = 0;
+        let mut skipped = 0;
+        let mut no_image = BTreeSet::new();
         if scenery {
             let ids = catalogue
                 .types
@@ -154,6 +180,13 @@ impl Scene {
                 }
                 let data = map.overlay_data[index];
                 cells.insert(cell, (id, data));
+                if matches!(id, 167 | 178) {
+                    // FUN_0047f6a0 returns before drawing IDs 167/178, the
+                    // stock placeholder types USELESS and VEINHOLEDUMMY.
+                    skipped += 1;
+                    no_image.insert((id, data, NoImage::EngineSkip));
+                    continue;
+                }
                 *references.entry(id).or_default().entry(data).or_default() += 1;
             }
         }
@@ -180,6 +213,11 @@ impl Scene {
             }
             let palette = &palettes[resolved.palette];
             for (frame, count) in frames {
+                if usize::from(frame) >= resolved.shp.frame_count() {
+                    out_of_range += count;
+                    no_image.insert((id, frame, NoImage::FrameOutOfRange));
+                    continue;
+                }
                 let image = match resolved.shp.frame(usize::from(frame)) {
                     Ok(image) => image,
                     Err(error) => {
@@ -190,6 +228,7 @@ impl Scene {
                 };
                 if image.pixels.iter().all(|&p| p == 0) {
                     empty += count;
+                    no_image.insert((id, frame, NoImage::EmptyFrame));
                     continue;
                 }
                 decoded += image.pixels.len() * 4;
@@ -213,7 +252,10 @@ impl Scene {
             images: images.len(),
             unresolved: missing,
             empty,
+            out_of_range,
+            skipped,
             outside,
+            no_image,
         };
         eprintln!(
             "{}",
@@ -405,10 +447,18 @@ mod tests {
         assert_eq!(
             (
                 scene.statistics.unresolved,
+                scene.statistics.out_of_range,
                 scene.statistics.empty,
                 scene.statistics.outside
             ),
-            (2, 1, 1)
+            (1, 1, 1, 1)
+        );
+        assert_eq!(
+            scene.statistics.no_image,
+            BTreeSet::from([
+                (0, 2, NoImage::EmptyFrame),
+                (0, 9, NoImage::FrameOutOfRange),
+            ])
         );
         assert_eq!(scene.cells.len(), 4);
         assert_eq!(map.overlay_data[3 * OVERLAY_SIDE + 3], 9); // no clamping/rewrite

@@ -231,4 +231,64 @@ hash `4ded6965e81531ec`. This is one map sample, not a complete vehicle census.
 A 1280×720 native Macroquad showcase cycles original GI/CONS/DOG Walk frames and
 rotates composed HTNK/MTNK VXL/HVA models. Its 360 exported frames form a 12-second
 30-fps MP4. Scripted showcase motion does not implement map actor movement or
-original combat. The existing 11 full-map graphics failures remain unresolved.
+original combat. The 11 full-map graphics failures listed above were later
+resolved as original engine behavior (superseded: see the 2026-10-19 section).
+
+## Strict map graphics acceptance resolved — engine no-image semantics (2026-10-19)
+
+The previously open whole-map graphics failures are resolved as original engine
+behavior, not as accepted exceptions, clamping or substitution. REA analysis of
+`gamemd.exe` (SHA-256 `7b8a0685…`) established each outcome; the earlier
+by-key numbering reading of the overlay registry was corrected by a cross-check
+of the draw-time skip IDs (below).
+
+| Original behavior | Evidence |
+| --- | --- |
+| Overlay IDs are first-seen order of distinct type names; numeric INI keys are labels | `FUN_005fe250`: types append (`array[count++] = this`) and store their own array index as the ID; `FUN_005fec70` returns the existing type for a repeated name |
+| Overlay map byte `0xff` means empty; every other byte indexes the type array directly, no bounds check | `FUN_005fd2e0` (`0x5fd41a`–`0x5fd433`; `FUN_005fc380` creates the overlay object) |
+| Draw returns before IDs 167 and 178 | `FUN_0047f6a0`; under first-seen ordering those IDs are the stock placeholders `USELESS` (rule key 170) and `VEINHOLEDUMMY` (key 181) |
+| Frame index at or past the SHP frame count draws nothing | `FUN_0047f6a0`, frame table lookup |
+| Missing tile file, ID beyond the theater catalogue and NULL TMP block draw nothing; subtile index wraps modulo the tile count | theater/TMP lookup paths |
+| YR reads only `"%sMD.INI"` theater lists and registers `EXPANDMD##.MIX` above the main archives | `FUN_00545150`, `FUN_005301a0` |
+
+Implementation consequences: scene statistics separate out-of-range frames and
+engine-skipped IDs; terrain resolution returns loaded / missing / outside instead
+of failing the map; TMP composition wraps subtile indexes and reports empty
+blocks; the strict check freezes the tolerated no-image references in
+`apps/ra2ne-runtime/tests/data/map_no_image_expected.tsv` and fails when a
+scanned map produces anything outside that table (exact bidirectional match per
+map; unknown rows are errors too).
+
+Frozen table (663 rows, all on the 11 previously failing maps):
+
+| Kind | Rows | Meaning |
+| --- | ---: | --- |
+| `terrain-missing` | 421 | tile resource file absent from every mounted archive (e.g. `Mclif06-19.sno`, `hyte01-09.sno`, `mram10.sno`, `mwater01.sno`) |
+| `terrain-noblock` | 140 | subtile index wraps to an empty/NULL tile block |
+| `terrain-outside` | 94 | tile ID beyond the theater catalogue (e.g. 989–1060) |
+| `overlay-frame` | 8 | stored data byte at/past the frame count (`205`/{6,9,10,12}; `179`/255 `CRATE`; `242`/10 `WCRATE`) |
+
+Full run with the supplied package (`RA2NE_GAME_DIR=Ra2Game412`,
+`RA2NE_MAP_DIR=…/maps-extracted`, `RA2NE_EDITION=yr`,
+`RA2NE_MAP_ENCODING=windows1252`), 371 maps, 314.4 s:
+
+```
+map_graphics_maps=371; terrain_images=240327; overlay_cells=271966;
+overlay_images=15687; empty_overlay_cells=10204; outside_overlay_cells=1;
+tolerated_no_image_refs=663
+map_scenery_cells=165818; images=7261; outside=0; out_of_range=0; failing_maps=0
+map_infantry_actors=4011; unresolved=0; failing_maps=0
+```
+
+Reproduce:
+
+```sh
+cargo test -p ra2ne-runtime all_private_map_graphics_resolve_and_decode -- --ignored --nocapture
+cargo test -p ra2ne-runtime freeze_map_no_image_expectations -- --ignored --nocapture  # regenerate the reviewed table
+```
+
+Known remaining fidelity gaps (documented, not acceptance blockers): ore/vein
+overlay frame selection still uses the stored data byte where the original
+computes frames from cell coordinates; the rubble overlay (`IsRubble`) object
+image path is not modeled; overlay/scenery animation, damage states and
+per-pixel depth remain pending.

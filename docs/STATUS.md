@@ -615,3 +615,50 @@ Clippy with denied warnings and release builds pass. The NewUrban GPU sample
 retains 441 actors and hash 4ded6965e81531ec at 120 ticks; all 38 voxel actors and
 45 infantry resolve. Normal lighting remains pending; no GPL implementation or
 normal tables were copied from OpenRA while investigating that next step.
+
+## 2026-10-19: engine-faithful map no-image semantics (strict check green)
+
+The 11 open full-map graphics failures are resolved as original engine behavior,
+not as passing exceptions. REA analysis of `gamemd.exe` established:
+
+- Overlay IDs are the first-seen order of distinct type names, not numeric INI
+  keys: `FUN_005fe250` appends each type (`array[count++] = this`) and stores
+  its own array index as the ID, and `FUN_005fec70` returns an existing type
+  when a name repeats. The map loader `FUN_005fd2e0` skips byte `0xff` and
+  otherwise indexes that array directly with the map byte. The draw entry
+  `FUN_0047f6a0` returns before IDs 167/178 — the stock placeholders `USELESS`
+  (rule key 170) and `VEINHOLEDUMMY` (key 181) under this ordering. An earlier
+  by-key reading of the registry was corrected by that cross-check.
+- Frames at or past the SHP frame count draw nothing; missing terrain files,
+  IDs beyond the theater catalogue and NULL TMP blocks draw nothing; subtile
+  indexes wrap modulo the tile count.
+- YR reads only `"%sMD.INI"` theater lists (`FUN_00545150`) and registers
+  `EXPANDMD##.MIX` packs above the main archives (`FUN_005301a0`).
+
+Implementation: scene statistics separate out-of-range frames and
+engine-skipped IDs; terrain resolution returns loaded / missing / outside
+instead of failing; TMP composition wraps subtile indexes and reports empty
+blocks.
+
+Acceptance: the strict private check freezes the tolerated no-image references
+in `apps/ra2ne-runtime/tests/data/map_no_image_expected.tsv` (663 rows on the
+same 11 maps: 421 `terrain-missing`, 140 `terrain-noblock`, 94
+`terrain-outside`, 8 `overlay-frame`) and fails on any unexpected reference or
+decode error. Full run over 371 maps: 240,327 terrain images, 271,966 overlay
+cells (15,687 images, 10,204 empty, 1 outside), 165,818 scenery cells (7,261
+images), 4,011 infantry actors, **0 failing maps, 0 unresolved references**
+(313.6 s). A companion ignored freeze test regenerates the table for review.
+
+Verification: 126 workspace tests pass (2 ignored acceptance tests); clippy with
+denied warnings, formatting and release builds pass. No clamping, substitution
+or fixture copies were added; original resources remain outside the repository.
+
+Same batch: map parsing diagnostics are classified (3,050 over 371 maps) and
+reproducible through the ignored `survey_map_parse_diagnostics` test: 3,001
+informational "N entries preserved; runtime semantics pending" notes across 15
+map sections that stay available through the map INI, 44 off-grid waypoint
+values (preserved, excluded from usable coordinates), 3 duplicate keys inside
+one section (last value wins, matching the original INI merge) and 2 entries
+outside any section (`multi/tn01t2.map` writes `CampaignMoneyDeltaEasy/Hard`,
+which the original reads from RULES.INI `[General]` with a section-scoped
+lookup, so a bare map entry cannot override them).

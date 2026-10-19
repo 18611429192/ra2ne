@@ -4,7 +4,7 @@ use ra2ne_assets::{
     map::Ra2Map,
     mix::{FilenameHash, MixArchive},
     sprite::Palette,
-    theater::Theater,
+    theater::{ResolvedTile, Theater},
     vfs::Vfs,
 };
 use std::collections::BTreeMap;
@@ -185,30 +185,41 @@ impl Terrain {
             *references.entry(id).or_default().entry(sub).or_default() += 1;
         }
         for (id, subtiles) in references {
-            let resolved = match theater.resolve(id, &files) {
-                Ok(resolved) => resolved,
+            let (tmp, filename) = match theater.resolve(id, &files) {
+                Ok(ResolvedTile::Loaded { tmp, filename, .. }) => (tmp, filename),
+                Ok(ResolvedTile::Missing) => {
+                    missing += subtiles.values().sum::<usize>();
+                    eprintln!("terrain tile {id}: theater TMP resource missing");
+                    continue;
+                }
+                Ok(ResolvedTile::Outside) => {
+                    missing += subtiles.values().sum::<usize>();
+                    eprintln!("terrain tile {id}: outside the theater catalogue");
+                    continue;
+                }
                 Err(error) => {
                     missing += subtiles.values().sum::<usize>();
                     eprintln!("terrain tile {id}: {error}");
                     continue;
                 }
             };
-            let source_extension = resolved.filename.rsplit_once('.').unwrap().1;
+            let source_extension = filename.rsplit_once('.').unwrap().1;
             let Some(palette) = palettes.get(source_extension) else {
                 missing += subtiles.values().sum::<usize>();
-                eprintln!(
-                    "terrain tile {id}: palette missing for {}",
-                    resolved.filename
-                );
+                eprintln!("terrain tile {id}: palette missing for {filename}");
                 continue;
             };
-            let tmp = resolved.tmp;
             if tmp.cell_width != 60 || tmp.cell_height != 30 {
                 return Err("viewer requires 60x30 TMP cells".into());
             }
             for (sub, cell_count) in subtiles {
                 let composite = match tmp.composite(usize::from(sub)) {
-                    Ok(image) => image,
+                    Ok(Some(image)) => image,
+                    Ok(None) => {
+                        missing += cell_count;
+                        eprintln!("terrain tile {id}/{sub}: block has no data");
+                        continue;
+                    }
                     Err(error) => {
                         missing += cell_count;
                         eprintln!("terrain tile {id}/{sub}: {error}");
@@ -216,7 +227,8 @@ impl Terrain {
                     }
                 };
                 let image = composite.image;
-                if tmp.extra(usize::from(sub)).is_some() {
+                let wrapped = usize::from(sub) % tmp.tile_count();
+                if tmp.extra(wrapped).is_some() {
                     extras += 1;
                 }
                 decoded += image.pixels.len() * 4;

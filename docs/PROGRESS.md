@@ -64,3 +64,12 @@ Experimental owner-color previews now use rules/map HSV definitions for vehicles
 and infantry while preserving neutral palettes and art remap flags. Cache keys
 separate owner colors. Stock gradient/lighting calibration remains pending;
 overall estimated coverage remains approximately 25%.
+
+The strict 371-map graphics acceptance check is now green with no clamping or
+substitution. REA on the original engine showed that every previously reported
+reference draws nothing there (missing terrain files, IDs beyond the theater
+catalogue, empty tile blocks, frames past the SHP frame table), so the check
+freezes those tolerated no-image outcomes in a reviewed expectation table and
+fails on anything unexpected. This closes the documented P0 acceptance gaps for
+these maps; original gameplay, animation and the 1.0 end-to-end target are still
+pending, so the overall estimate remains approximately 25%.

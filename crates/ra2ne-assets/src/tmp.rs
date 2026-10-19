@@ -149,17 +149,22 @@ impl Tmp {
             self.cell_height,
         )
     }
+    /// The engine indexes blocks with `sub % block_count`; a NULL block
+    /// (missing file or empty slot) draws nothing at all.
     /// Index zero is transparent in extra graphics. Coordinates in the TMP
     /// header share a tile-wide origin; subtract the subtile's diamond origin.
     /// Z planes remain separate for a future depth-aware renderer.
-    pub fn composite(&self, index: usize) -> Result<TmpImage, &'static str> {
+    pub fn composite(&self, index: usize) -> Result<Option<TmpImage>, &'static str> {
+        let Some(index) = self.wrapped(index) else {
+            return Ok(None);
+        };
         let base = self.diamond(index)?;
         let Some(extra) = self.extra(index) else {
-            return Ok(TmpImage {
+            return Ok(Some(TmpImage {
                 image: base,
                 offset_x: 0,
                 offset_y: 0,
-            });
+            }));
         };
         let tile = self.tile(index).ok_or("missing TMP tile")?;
         let dx = i64::from(tile.extra_x) - i64::from(tile.x);
@@ -192,11 +197,19 @@ impl Tmp {
                 }
             }
         }
-        Ok(TmpImage {
+        Ok(Some(TmpImage {
             image,
             offset_x: left as i32,
             offset_y: top as i32,
-        })
+        }))
+    }
+    /// Original blit wrap: `subtile % (blocks_width * blocks_height)`.
+    fn wrapped(&self, index: usize) -> Option<usize> {
+        if self.tiles.is_empty() {
+            return None;
+        }
+        let index = index % self.tiles.len();
+        self.tiles[index].as_ref().map(|_| index)
     }
     pub fn z_plane(&self, index: usize) -> Result<Option<IndexedImage>, &'static str> {
         let tile = self.tile(index).ok_or("missing TMP tile")?;
@@ -305,7 +318,7 @@ mod tests {
         }
         bytes.extend([90, 91, 92, 93, 94, 95, 0, 0, 0, 96]);
         let tmp = Tmp::parse(Arc::from(bytes)).unwrap();
-        let composite = tmp.composite(0).unwrap();
+        let composite = tmp.composite(0).unwrap().unwrap();
         assert_eq!((composite.offset_x, composite.offset_y), (-1, -1));
         assert_eq!((composite.image.width, composite.image.height), (9, 5));
         assert_eq!(&composite.image.pixels[..4], &[90, 91, 92, 93]);
@@ -329,18 +342,27 @@ mod tests {
         bytes.push(1);
         assert!(Tmp::parse(Arc::from(bytes)).unwrap().composite(0).is_err());
         let tmp = Tmp::parse(Arc::from(sample())).unwrap();
-        assert_eq!(tmp.composite(0).unwrap().image, tmp.diamond(0).unwrap());
-        assert!(tmp.composite(1).is_err());
+        assert_eq!(
+            tmp.composite(0).unwrap().unwrap().image,
+            tmp.diamond(0).unwrap()
+        );
+        // Wrap semantics: subtile 1 of a single-block sheet repeats block 0.
+        assert_eq!(
+            tmp.composite(1).unwrap().unwrap().image,
+            tmp.diamond(0).unwrap()
+        );
     }
     #[test]
-    fn missing_tiles_and_bad_offsets_fail_without_overread() {
+    fn empty_blocks_wrap_to_no_image_and_missing_tiles_fail_without_overread() {
         let bytes = sample();
         for n in 0..bytes.len() {
             assert!(Tmp::parse(Arc::from(&bytes[..n])).is_err());
         }
         let mut missing = bytes.clone();
         missing[16..20].fill(0);
-        assert!(Tmp::parse(Arc::from(missing)).unwrap().tile(0).is_none());
+        let empty = Tmp::parse(Arc::from(missing)).unwrap();
+        assert!(empty.tile(0).is_none());
+        assert!(empty.composite(0).unwrap().is_none());
         let mut bad = bytes;
         bad[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(Tmp::parse(Arc::from(bad)).is_err());

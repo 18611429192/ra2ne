@@ -84,6 +84,20 @@ Trigger/team/script/terrain/lighting and related sections are retained with
 runtime-pending diagnostics. Missing terrain or malformed placed records fail
 explicitly. Authentic game and MOD fixture verification remains required.
 
+Map parse diagnostics over the 371 supplied maps (2026-10-19; reproduce with
+`cargo test -p ra2ne-runtime survey_map_parse_diagnostics -- --ignored --nocapture`)
+total 3,050 and classify as:
+
+| Category | Count | Handling |
+| --- | ---: | --- |
+| "N entries preserved; runtime semantics pending" | 3,001 | Informational: 15 map sections (Lighting, Terrain, PreviewPack, Actions, Events, Tags, Triggers, Houses, ScriptTypes, TaskForces, TeamTypes, Smudge, AITriggerTypes, CellTags, Countries) stay available through the map INI; trigger/AI/house/lighting simulation is not implemented. |
+| Off-grid `Waypoints` values | 44 | Preserved but excluded from usable coordinates; the engine has no cell outside the grid. |
+| Duplicate key inside one section | 3 | Last value wins, matching the original INI merge (`mapsmd03/310709fc` repeats `[YAGRND]`, `multimd/d508117d` repeats `BaseNormal`/`Sight`). |
+| Entry outside any section | 2 | Ignored for lookups: `multi/tn01t2.map` writes `CampaignMoneyDeltaEasy/Hard`, which belong to RULES.INI `[General]` (stock rules.ini line 242) and are read section-scoped, so a bare map entry cannot override them. |
+
+None of these categories is a syntax error in the original parser; all are
+kept, and only the last two are annotated as text oddities rather than errors.
+
 Rules support explicit source layers merged per section/key, keeping registry
 positions stable when existing keys are overridden. An index avoids rescanning
 the whole INI for every unit. Initial typed discovery handles four object
@@ -203,6 +217,17 @@ reports each non-strict value. General INI integer parsing remains strict. The
 provided stock UrbanNMD INI contains `TilesInSet=o`, which resolves to zero in
 the original editor and must not shift subsequent map IDs.
 
+Engine checks (`gamemd.exe`): the theater loader `FUN_00545150` builds only the
+`"%sMD.INI"` name (format string `0x8295e8`), so a YR install reads e.g.
+`temperatmd.ini` alone — the base list is not merged. The supplied stock md
+lists are supersets of the base lists for all three theaters, so the tile IDs
+match the editor's merge. Tile lookup appends `.TEM` (string `0x829140`) and
+`.URB` (string `0x829138`) after the environment extension and the
+NewUrban→Urban fallback. A missing tile file, a map ID beyond the catalogue, a
+subtile index past the TMP's tile list and a NULL tile block all draw nothing
+in the original: subtile indices wrap modulo the tile count, and missing inputs
+are neither errors nor substitution candidates.
+
 [EA/XCC TMP geometry](https://github.com/electronicarts/CNC_TS_and_RA2_Mission_Editor/blob/main/3rdParty/xcc/misc/tmp_ts_file.cpp)
 places base and extra graphics in the same coordinate system. RA2NE subtracts
 the subtile's base X/Y from extra X/Y and composites nonzero extra indices over
@@ -234,6 +259,22 @@ bridge/track offsets and culls by image bounds. Fully transparent frames and
 references outside decoded terrain cells are counted separately. Source arrays
 are preserved. RGBA caching is bounded to 128 MiB. Animation, damage selection,
 per-pixel depth, remap/shadows and gameplay remain pending.
+
+Engine checks (`gamemd.exe`): the map loader `FUN_005fd2e0` reads the overlay
+pack byte by byte, skips `0xff` (no overlay) and otherwise indexes its type
+array directly with that byte — `DAT_00a83d84[byte]`, no bounds check.
+`FUN_005fe250` appends each new type and stores its own array index as the ID,
+and `FUN_005fec70` returns an existing type when a name repeats: IDs are
+first-seen order of distinct names, numeric INI keys are labels, and duplicates
+or invalid definitions never shift later IDs. The draw entry `FUN_0047f6a0`
+returns before drawing IDs 167 and 178 — the stock placeholder types `USELESS`
+and `VEINHOLEDUMMY` — and draws nothing when the stored data byte is not below
+the SHP's frame count. RA2NE implements those outcomes, including the modulo
+wrap and NULL-block rules for terrain, and freezes the tolerated no-image
+references in `apps/ra2ne-runtime/tests/data/map_no_image_expected.tsv` instead
+of clamping frames or substituting resources. Ore/vein and rubble overlay
+frame selection still uses the stored byte; the original computes ore frames
+from cell coordinates.
 
 ## Placed scenery records and drawing anchor
 

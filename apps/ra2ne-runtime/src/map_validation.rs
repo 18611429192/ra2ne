@@ -1,11 +1,14 @@
 //! Opt-in acceptance check against user-owned maps and stock resources.
 //! CI never needs or distributes original game files.
 use super::{installation, overlays, read};
-use ra2ne_assets::{map::Ra2Map, sprite::Palette, text::TextEncoding};
+use ra2ne_assets::{map::Ra2Map, sprite::Palette, text::TextEncoding, theater::ResolvedTile};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
+const EXPECTED_NO_IMAGE: &str = include_str!("../tests/data/map_no_image_expected.tsv");
+/// A tolerated no-image reference: kind, byte/word id, and frame/subtile.
+type NoImageRef = (String, i32, u8);
 fn collect(root: &Path, depth: usize, paths: &mut Vec<PathBuf>) -> Result<(), String> {
     if depth > 8 {
         return Err("map directory nesting exceeds eight levels".into());
@@ -39,21 +42,67 @@ fn load(path: &Path, encoding: TextEncoding) -> Result<(String, Ra2Map), String>
     let map = Ra2Map::parse(&text)?;
     Ok((text, map))
 }
-#[test]
-#[ignore = "requires RA2NE_GAME_DIR and RA2NE_MAP_DIR containing user-owned resources"]
-fn all_private_map_graphics_resolve_and_decode() {
-    let game = std::env::var("RA2NE_GAME_DIR").expect("set RA2NE_GAME_DIR");
-    let root = std::env::var("RA2NE_MAP_DIR").expect("set RA2NE_MAP_DIR");
-    let edition = installation::Edition::parse(
-        &std::env::var("RA2NE_EDITION").unwrap_or_else(|_| "yr".into()),
-    )
-    .unwrap();
-    let encoding = TextEncoding::parse(
-        &std::env::var("RA2NE_MAP_ENCODING").unwrap_or_else(|_| "windows1252".into()),
-    )
-    .unwrap();
+fn expected_no_image() -> BTreeMap<String, BTreeSet<NoImageRef>> {
+    let mut expected = BTreeMap::<String, BTreeSet<NoImageRef>>::new();
+    for (number, line) in EXPECTED_NO_IMAGE.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        let [map, kind, id, index] = fields[..] else {
+            panic!(
+                "map_no_image_expected.tsv:{}: expected four tab-separated fields",
+                number + 1
+            );
+        };
+        assert!(
+            [
+                "terrain-missing",
+                "terrain-noblock",
+                "terrain-outside",
+                "overlay-frame",
+                "overlay-skip",
+            ]
+            .contains(&kind),
+            "map_no_image_expected.tsv:{}: unknown kind {kind}",
+            number + 1
+        );
+        expected.entry(map.to_owned()).or_default().insert((
+            kind.to_owned(),
+            id.parse().unwrap(),
+            index.parse().unwrap(),
+        ));
+    }
+    expected
+}
+#[derive(Default)]
+struct Totals {
+    terrain_images: usize,
+    overlay_cells: usize,
+    overlay_images: usize,
+    empty_cells: usize,
+    outside_cells: usize,
+    infantry_actors: usize,
+    infantry_unresolved: usize,
+    infantry_failures: usize,
+    scenery_cells: usize,
+    scenery_images: usize,
+    scenery_failures: usize,
+    scenery_outside: usize,
+    scenery_out_of_range: usize,
+}
+/// Resolve and decode every referenced image under the same rules the
+/// original engine uses, recording the references that intentionally draw
+/// nothing alongside any hard failures.
+fn scan(
+    game: &str,
+    root: &str,
+    edition: installation::Edition,
+    encoding: TextEncoding,
+) -> (BTreeMap<String, BTreeSet<NoImageRef>>, Vec<String>, Totals) {
     let mut paths = Vec::new();
-    collect(Path::new(&root), 0, &mut paths).unwrap();
+    collect(Path::new(root), 0, &mut paths).unwrap();
     paths.sort();
     assert!(!paths.is_empty(), "no .map/.mpr/.yrm files found");
     let mut groups = BTreeMap::<String, Vec<PathBuf>>::new();
@@ -61,25 +110,21 @@ fn all_private_map_graphics_resolve_and_decode() {
         let (_, map) = load(path, encoding).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         groups.entry(map.theater).or_default().push(path.clone());
     }
+    let mut actual = BTreeMap::<String, BTreeSet<NoImageRef>>::new();
     let mut failures = Vec::new();
-    let mut terrain_images = 0;
-    let mut overlay_cells = 0;
-    let mut empty_cells = 0;
-    let mut outside_cells = 0;
-    let mut overlay_images = 0;
-    let mut infantry_actors = 0;
-    let mut infantry_unresolved = 0;
-    let mut infantry_failures = 0;
-    let mut scenery_cells = 0;
-    let mut scenery_images = 0;
-    let mut scenery_failures = 0;
-    let mut scenery_outside = 0;
+    let mut totals = Totals::default();
     for (environment, paths) in groups {
         let (catalogue, _, files) =
-            installation::load(&game, edition, &environment, encoding).unwrap();
+            installation::load(game, edition, &environment, encoding).unwrap();
         let mut checked_palettes = BTreeSet::new();
         for path in &paths {
             let (text, map) = load(path, encoding).unwrap();
+            let key = path
+                .strip_prefix(root)
+                .map_or_else(|_| path.clone(), Path::to_path_buf)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let refs = actual.entry(key).or_default();
             let mut tiles = BTreeMap::<i16, BTreeSet<u8>>::new();
             for tile in &map.tiles {
                 tiles
@@ -87,80 +132,118 @@ fn all_private_map_graphics_resolve_and_decode() {
                     .or_default()
                     .insert(tile.sub_tile);
             }
-            let scenery = overlays::Scene::load_scenery(&files, &map, &text, edition, encoding);
-            let scenery_error = match scenery {
-                Ok(scene) => {
-                    scenery_cells += scene.statistics.cells;
-                    scenery_images += scene.statistics.images;
-                    scenery_outside += scene.statistics.outside;
-                    if scene.statistics.unresolved > 0 {
-                        scenery_failures += 1;
-                        Some(format!(
-                            "{} unresolved scenery records",
-                            scene.statistics.unresolved
-                        ))
-                    } else {
-                        None
+            let scenery_error =
+                match overlays::Scene::load_scenery(&files, &map, &text, edition, encoding) {
+                    Ok(scene) => {
+                        totals.scenery_cells += scene.statistics.cells;
+                        totals.scenery_images += scene.statistics.images;
+                        totals.scenery_outside += scene.statistics.outside;
+                        totals.scenery_out_of_range += scene.statistics.out_of_range;
+                        let structural = scene
+                            .statistics
+                            .no_image
+                            .iter()
+                            .filter(|(_, _, kind)| !matches!(kind, overlays::NoImage::EmptyFrame))
+                            .map(|(id, frame, kind)| format!("{id}/{frame} {kind:?}"))
+                            .collect::<Vec<_>>();
+                        if scene.statistics.unresolved > 0 || !structural.is_empty() {
+                            totals.scenery_failures += 1;
+                            Some(format!(
+                                "{} unresolved scenery records, structural no-image [{}]",
+                                scene.statistics.unresolved,
+                                structural.join(", ")
+                            ))
+                        } else {
+                            None
+                        }
                     }
-                }
-                Err(error) => {
-                    scenery_failures += 1;
-                    Some(error)
-                }
-            };
+                    Err(error) => {
+                        totals.scenery_failures += 1;
+                        Some(error)
+                    }
+                };
             let infantry_error =
                 match super::infantry::Scene::load(&files, &map, &text, edition, encoding) {
                     Ok(scene) => {
-                        infantry_actors += scene.cells;
-                        infantry_unresolved += scene.unresolved;
+                        totals.infantry_actors += scene.cells;
+                        totals.infantry_unresolved += scene.unresolved;
                         if scene.unresolved > 0 {
-                            infantry_failures += 1;
+                            totals.infantry_failures += 1;
                             Some(scene.report())
                         } else {
                             None
                         }
                     }
                     Err(error) => {
-                        infantry_failures += 1;
+                        totals.infantry_failures += 1;
                         Some(error)
                     }
                 };
             let check = (|| -> Result<(), String> {
                 for (id, subtiles) in tiles {
-                    let resolved = catalogue
+                    match catalogue
                         .resolve(id, &files)
-                        .map_err(|e| format!("terrain {id}: {e}"))?;
-                    if resolved.tmp.cell_width != 60 || resolved.tmp.cell_height != 30 {
-                        return Err(format!("terrain {id}: non-60x30 cell"));
-                    }
-                    let palette = match resolved.filename.rsplit_once('.').unwrap().1 {
-                        "tem" => "isotem.pal",
-                        "sno" => "isosno.pal",
-                        "urb" => "isourb.pal",
-                        "ubn" => "isoubn.pal",
-                        "des" => "isodes.pal",
-                        "lun" => "isolun.pal",
-                        _ => return Err("unknown resolved terrain extension".into()),
-                    };
-                    if checked_palettes.insert(palette) {
-                        let file = files
-                            .get(palette)?
-                            .ok_or("resolved terrain palette missing")?;
-                        Palette::parse(file.bytes)?;
-                    }
-                    for sub in subtiles {
-                        resolved
-                            .tmp
-                            .composite(usize::from(sub))
-                            .map_err(|e| format!("terrain {id}/{sub}: {e}"))?;
-                        terrain_images += 1;
+                        .map_err(|e| format!("terrain {id}: {e}"))?
+                    {
+                        ResolvedTile::Loaded { tmp, filename, .. } => {
+                            if tmp.cell_width != 60 || tmp.cell_height != 30 {
+                                return Err(format!("terrain {id}: non-60x30 cell"));
+                            }
+                            let palette = match filename.rsplit_once('.').unwrap().1 {
+                                "tem" => "isotem.pal",
+                                "sno" => "isosno.pal",
+                                "urb" => "isourb.pal",
+                                "ubn" => "isoubn.pal",
+                                "des" => "isodes.pal",
+                                "lun" => "isolun.pal",
+                                _ => return Err("unknown resolved terrain extension".into()),
+                            };
+                            if checked_palettes.insert(palette) {
+                                let file = files
+                                    .get(palette)?
+                                    .ok_or("resolved terrain palette missing")?;
+                                Palette::parse(file.bytes)?;
+                            }
+                            for sub in subtiles {
+                                match tmp
+                                    .composite(usize::from(sub))
+                                    .map_err(|e| format!("terrain {id}/{sub}: {e}"))?
+                                {
+                                    Some(_) => totals.terrain_images += 1,
+                                    None => {
+                                        refs.insert(("terrain-noblock".into(), i32::from(id), sub));
+                                    }
+                                }
+                            }
+                        }
+                        ResolvedTile::Missing => {
+                            for sub in subtiles {
+                                refs.insert(("terrain-missing".into(), i32::from(id), sub));
+                            }
+                        }
+                        ResolvedTile::Outside => {
+                            for sub in subtiles {
+                                refs.insert(("terrain-outside".into(), i32::from(id), sub));
+                            }
+                        }
                     }
                 }
                 let scene = overlays::Scene::load(&files, &map, &text, edition, encoding)?;
-                overlay_cells += scene.statistics.cells;
-                overlay_images += scene.statistics.images;
-                empty_cells += scene.statistics.empty;
-                outside_cells += scene.statistics.outside;
+                totals.overlay_cells += scene.statistics.cells;
+                totals.overlay_images += scene.statistics.images;
+                totals.empty_cells += scene.statistics.empty;
+                totals.outside_cells += scene.statistics.outside;
+                for &(id, frame, kind) in &scene.statistics.no_image {
+                    match kind {
+                        overlays::NoImage::EmptyFrame => {}
+                        overlays::NoImage::FrameOutOfRange => {
+                            refs.insert(("overlay-frame".into(), i32::from(id), frame));
+                        }
+                        overlays::NoImage::EngineSkip => {
+                            refs.insert(("overlay-skip".into(), i32::from(id), frame));
+                        }
+                    }
+                }
                 if scene.statistics.unresolved > 0 {
                     return Err(format!(
                         "{} unresolved overlay cells",
@@ -189,16 +272,145 @@ fn all_private_map_graphics_resolve_and_decode() {
             failures.len()
         );
     }
+    (actual, failures, totals)
+}
+fn compare(
+    expected: &BTreeMap<String, BTreeSet<NoImageRef>>,
+    actual: &BTreeMap<String, BTreeSet<NoImageRef>>,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (map, expected_refs) in expected {
+        let Some(actual_refs) = actual.get(map) else {
+            println!("map_no_image_expected.tsv: {map} was not scanned; skipped");
+            continue;
+        };
+        for reference in expected_refs.difference(actual_refs) {
+            problems.push(format!(
+                "{map}: recorded no-image case vanished: {reference:?}"
+            ));
+        }
+        for reference in actual_refs.difference(expected_refs) {
+            problems.push(format!("{map}: unexpected no-image case: {reference:?}"));
+        }
+    }
+    for (map, actual_refs) in actual {
+        if expected.contains_key(map) {
+            continue;
+        }
+        for reference in actual_refs {
+            problems.push(format!("{map}: unexpected no-image case: {reference:?}"));
+        }
+    }
+    problems
+}
+#[test]
+#[ignore = "prints a classification of map parsing diagnostics for the checked map set"]
+fn survey_map_parse_diagnostics() {
+    let root = std::env::var("RA2NE_MAP_DIR").expect("set RA2NE_MAP_DIR");
+    let encoding = TextEncoding::parse(
+        &std::env::var("RA2NE_MAP_ENCODING").unwrap_or_else(|_| "windows1252".into()),
+    )
+    .unwrap();
+    let mut paths = Vec::new();
+    collect(Path::new(&root), 0, &mut paths).unwrap();
+    paths.sort();
+    let mut counts = BTreeMap::<String, usize>::new();
+    let mut details = Vec::new();
+    let mut total = 0;
+    for path in &paths {
+        let (_, map) = load(path, encoding).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let key = path
+            .strip_prefix(&root)
+            .map_or_else(|_| path.clone(), Path::to_path_buf)
+            .to_string_lossy()
+            .replace('\\', "/");
+        for diagnostic in &map.diagnostics {
+            let label = format!("{}: {}", diagnostic.section, diagnostic.message);
+            *counts.entry(label).or_default() += 1;
+            total += 1;
+            if !diagnostic.message.ends_with("runtime semantics pending") {
+                details.push(format!(
+                    "{key}:{}: {}: {}",
+                    diagnostic.line, diagnostic.section, diagnostic.message
+                ));
+            }
+        }
+    }
+    println!("map_parse_diagnostics={total}; maps={}", paths.len());
+    for (key, count) in counts {
+        println!("{count}\t{key}");
+    }
+    println!("--- detail:");
+    for detail in details {
+        println!("{detail}");
+    }
+}
+#[test]
+#[ignore = "requires RA2NE_GAME_DIR and RA2NE_MAP_DIR containing user-owned resources"]
+fn all_private_map_graphics_resolve_and_decode() {
+    let game = std::env::var("RA2NE_GAME_DIR").expect("set RA2NE_GAME_DIR");
+    let root = std::env::var("RA2NE_MAP_DIR").expect("set RA2NE_MAP_DIR");
+    let edition = installation::Edition::parse(
+        &std::env::var("RA2NE_EDITION").unwrap_or_else(|_| "yr".into()),
+    )
+    .unwrap();
+    let encoding = TextEncoding::parse(
+        &std::env::var("RA2NE_MAP_ENCODING").unwrap_or_else(|_| "windows1252".into()),
+    )
+    .unwrap();
+    let (actual, failures, totals) = scan(&game, &root, edition, encoding);
     println!(
-        "map_graphics_maps={}; terrain_images={terrain_images}; overlay_cells={overlay_cells}; overlay_images={overlay_images}; empty_overlay_cells={empty_cells}; outside_overlay_cells={outside_cells}; failures={}",
-        paths.len(),
-        failures.len()
+        "map_graphics_maps={}; terrain_images={}; overlay_cells={}; overlay_images={}; empty_overlay_cells={}; outside_overlay_cells={}; tolerated_no_image_refs={}",
+        actual.len(),
+        totals.terrain_images,
+        totals.overlay_cells,
+        totals.overlay_images,
+        totals.empty_cells,
+        totals.outside_cells,
+        actual.values().map(BTreeSet::len).sum::<usize>(),
     );
     println!(
-        "map_scenery_cells={scenery_cells}; images={scenery_images}; outside={scenery_outside}; failing_maps={scenery_failures}"
+        "map_scenery_cells={}; images={}; outside={}; out_of_range={}; failing_maps={}",
+        totals.scenery_cells,
+        totals.scenery_images,
+        totals.scenery_outside,
+        totals.scenery_out_of_range,
+        totals.scenery_failures
     );
     println!(
-        "map_infantry_actors={infantry_actors}; unresolved={infantry_unresolved}; failing_maps={infantry_failures}"
+        "map_infantry_actors={}; unresolved={}; failing_maps={}",
+        totals.infantry_actors, totals.infantry_unresolved, totals.infantry_failures
     );
+    let mut problems = compare(&expected_no_image(), &actual);
+    problems.extend(failures);
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+#[test]
+#[ignore = "rewrites the frozen no-image table; review the diff before committing it"]
+fn freeze_map_no_image_expectations() {
+    let game = std::env::var("RA2NE_GAME_DIR").expect("set RA2NE_GAME_DIR");
+    let root = std::env::var("RA2NE_MAP_DIR").expect("set RA2NE_MAP_DIR");
+    let edition = installation::Edition::parse(
+        &std::env::var("RA2NE_EDITION").unwrap_or_else(|_| "yr".into()),
+    )
+    .unwrap();
+    let encoding = TextEncoding::parse(
+        &std::env::var("RA2NE_MAP_ENCODING").unwrap_or_else(|_| "windows1252".into()),
+    )
+    .unwrap();
+    let (actual, failures, _) = scan(&game, &root, edition, encoding);
+    let mut table = String::from(
+        "# Frozen tolerated no-image references for the checked installation.\n\
+         # Every other referenced image must resolve and decode; regenerate with\n\
+         # `cargo test -p ra2ne-runtime freeze_map_no_image_expectations -- --ignored`.\n\
+         # map\tkind\tid\tindex\n",
+    );
+    for (map, refs) in &actual {
+        for (kind, id, index) in refs {
+            table.push_str(&format!("{map}\t{kind}\t{id}\t{index}\n"));
+        }
+    }
+    std::fs::write("tests/data/map_no_image_expected.tsv", &table).unwrap();
+    println!("wrote {} no-image references", table.lines().count() - 4);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
