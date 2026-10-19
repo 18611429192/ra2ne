@@ -9,7 +9,7 @@
 |------|------|------|
 | Temurin JDK | 21.0.12.1 | `/opt/rea-tools/jdk21`（软链） |
 | Ghidra | 12.1.4 | `/opt/rea-tools/ghidra`（软链） |
-| REA CLI/MCP | 6.5.0 | 经 `npx -y rea-agents@6.5.0` 运行 |
+| REA CLI/MCP | 6.5.0 | `/opt/rea-tools/agents`（本地包直启，不经 npx） |
 
 环境变量（对所有 shell 生效）：`/etc/profile.d/rea-env.sh`
 
@@ -23,7 +23,11 @@ GHIDRA_INSTALL_DIR=/opt/rea-tools/ghidra
 
 - MCP 服务器 `rea` 已注册到 `~/.config/opencode/opencode.jsonc`（`mcp.rea`），
   带 `GHIDRA_INSTALL_DIR`/`JAVA_HOME` 环境注入；原配置备份在
-  `~/.config/opencode/opencode.jsonc.rea.backup`。
+  `~/.config/opencode/opencode.jsonc.rea.backup`，npx 直启版本的备份为
+  `opencode.jsonc.bak-before-rea-direct`。
+- MCP 启动命令（不经 npx，直接跑本地包）：
+  `["/usr/local/node/bin/node", "/opt/rea-tools/agents/node_modules/rea-agents/scripts/rea.mjs", "mcp"]`，
+  原因见"已知说明"2026-10-19 条。
 - 技能 `reverse-engineer-anything`（version 42, 207 个 MCP 工具）已安装。
 - 使用方式：直接对 agent 说需求，例如
   "用 REA 分析 gamemd.exe 的 XXX 函数做什么"；agent 通过 MCP 调用 REA 工具。
@@ -48,16 +52,17 @@ CLI 用法：
 
 ```bash
 source /etc/profile.d/rea-env.sh
-npx -y rea-agents@latest analyze Ra2Game412/gamemd.exe \
+REA=/opt/rea-tools/agents/node_modules/rea-agents/scripts/rea.mjs
+node "$REA" analyze Ra2Game412/gamemd.exe \
   --provider ghidra --snapshot Ra2Game412/analysis/gamemd.analysis.json
 ```
 
 其他常用 CLI：
 
 ```bash
-npx -y rea-agents@latest decompile Ra2Game412/gamemd.exe --provider ghidra   # 反编译
-npx -y rea-agents@latest function <name-or-address> ...                       # 函数档案
-npx -y rea-agents@latest doctor --provider ghidra                             # 健康检查
+node "$REA" decompile Ra2Game412/gamemd.exe --provider ghidra   # 反编译
+node "$REA" function <name-or-address> ...                       # 函数档案
+node "$REA" doctor --provider ghidra                             # 健康检查
 ```
 
 ## 验证记录（2026-10-16）
@@ -125,6 +130,12 @@ npx -y rea-agents@latest doctor --provider ghidra                             # 
 
 ## 已知说明
 
+- 2026-10-19：npm 注册表从本机不可达（`npm view` 超时），导致
+  `npx -y rea-agents@6.5.0 mcp` 启动 MCP 时卡在注册表查询、超过
+  OpenCode 约 32 秒的连接上限而反复失败。修复：把 npx 缓存包复制到
+  `/opt/rea-tools/agents`，MCP 配置与 CLI 用法均改为
+  `node /opt/rea-tools/agents/node_modules/rea-agents/scripts/rea.mjs`；
+  改后 OpenCode 自动重连成功（tools=207，实测本地直启握手约 1 秒）。
 - `/etc/os-release` 曾补加 `ID_LIKE="rhel fedora"`（Kylin V10 为 RHEL 系，
   原文件缺失该字段导致 REA 将主机判为 unsupported；备份在
   `/etc/os-release.bak-rea`）。修改后 host 检查 healthy。
